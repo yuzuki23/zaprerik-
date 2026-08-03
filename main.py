@@ -406,6 +406,41 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
             f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_4pda_to.bin')}",
         ]),
     },
+    "X": {
+        "name": "Discord Full (Split TCP/UDP)",
+        "desc": "Два процесса: TCP — агрессивный; UDP — мягкий disorder + широкие порты.",
+        "processes": [
+            # --- Процесс 1: только TCP (HTTPS/чат/сайты) ---
+            [
+                "--wf-tcp=80,443,2053,2083,2087,2096,8443",
+                *_chain_discord_media(_MULTISPLIT_681),
+                *_chain_google(_MULTISPLIT_681),
+                *_chain_general([
+                    "--dpi-desync=multisplit",
+                    "--dpi-desync-split-seqovl=568",
+                    "--dpi-desync-split-pos=1",
+                    f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_4pda_to.bin')}",
+                ]),
+            ],
+            # --- Процесс 2: только UDP (голос/QUIC), мягко ---
+            [
+                "--wf-udp=443,19294-19344,50000-50100,49152-65535",
+                # QUIC Discord/YouTube
+                "--filter-udp=443",
+                _hostlist(_lst("list-general.txt")),
+                _hostlist_excl(_lst("list-exclude.txt")),
+                "--dpi-desync=fake",
+                "--dpi-desync-repeats=6",
+                f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
+                "--new",
+                # Голосовые UDP-порты Discord: мягкий disorder без fake,
+                # покрытие включает эфемерный диапазон на случай нестандартных портов
+                "--filter-udp=19294-19344,50000-50100,49152-65535",
+                "--filter-l7=discord,stun",
+                "--dpi-desync=disorder",
+            ],
+        ],
+    },
 }
 
 
@@ -415,8 +450,9 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
 console = Console(highlight=False)
 logger = logging.getLogger("zapretik")
 
-# Активный дочерний процесс winws (нужен для пункта меню "Стоп" и Ctrl+C).
-win_proc: Optional[subprocess.Popen[str]] = None
+# Активные дочерние процессы winws (нужны для пункта меню "Стоп" и Ctrl+C).
+# Стратегии со split-туннелированием запускают несколько процессов сразу.
+win_procs: List[subprocess.Popen[str]] = []
 
 
 # --------------------------------------------------------------------------- #
@@ -657,8 +693,13 @@ def download_core() -> None:
 # --------------------------------------------------------------------------- #
 
 def run_strategy(key: str, strategy: Dict[str, Sequence[str]]) -> None:
-    """Запускает winws.exe с аргументами выбранной стратегии."""
-    global win_proc
+    """Запускает winws.exe с аргументами выбранной стратегии.
+
+    Обычная стратегия = один процесс (поле "args"). Split-стратегии
+    задают поле "processes" — список списков аргументов; каждый элемент
+    запускается отдельным процессом winws (TCP и UDP не пересекаются).
+    """
+    global win_procs
 
     name = strategy["name"]
     console.print()
@@ -669,63 +710,72 @@ def run_strategy(key: str, strategy: Dict[str, Sequence[str]]) -> None:
         input("Нажмите Enter, чтобы вернуться в меню...")
         return
 
-    cmd_line = [str(BIN_DIR / "winws.exe"), *[str(a) for a in strategy["args"]]]
-    logger.info("Запуск процесса: %s", " ".join(cmd_line))
+    arg_sets = strategy.get("processes") or [strategy["args"]]
 
-    try:
-        proc = subprocess.Popen(
-            cmd_line,
-            start_new_session=True,
-            stderr=None,
-        )
-    except Exception as exc:
-        logger.error("Не удалось запустить winws: %s", exc)
-        input("Нажмите Enter, чтобы вернуться в меню...")
-        return
+    procs: List[subprocess.Popen[str]] = []
+    for args in arg_sets:
+        cmd_line = [str(BIN_DIR / "winws.exe"), *[str(a) for a in args]]
+        logger.info("Запуск процесса: %s", " ".join(cmd_line))
+        try:
+            proc = subprocess.Popen(
+                cmd_line,
+                start_new_session=True,
+                stderr=None,
+            )
+        except Exception as exc:
+            logger.error("Не удалось запустить winws: %s", exc)
+            for p in procs:  # откатываем уже запущенные
+                p.terminate()
+            input("Нажмите Enter, чтобы вернуться в меню...")
+            return
+        procs.append(proc)
 
-    win_proc = proc
-    logger.info("Процесс запущен (PID=%s). Стратегия активна.", proc.pid)
+    win_procs = procs
+    logger.info(
+        "Запущено процессов: %s (PID: %s). Стратегия активна.",
+        len(procs), ", ".join(str(p.pid) for p in procs),
+    )
     console.print(
         "[dim]Для остановки обхода нажмите Ctrl+C или выберите пункт «Остановить».[/dim]"
     )
 
     # Ждём, пока пользователь не остановит процесс (пунктом меню или Ctrl+C).
     try:
-        while win_proc is not None and win_proc.poll() is None:
+        while any(p.poll() is None for p in win_procs):
             time.sleep(0.5)
     except KeyboardInterrupt:
         handle_interrupt()  # дежурная обработка (обычно делает отмена sts)
         return
 
-    if win_proc is not None:
-        code = win_proc.returncode
-        win_proc = None
-        logger.info("Процесс winws завершён (код: %s).", code)
+    for p in win_procs:
+        code = p.poll()
+        logger.info("Процесс winws завершён (PID=%s, код: %s).", p.pid, code)
+    win_procs = []
 
 
 def stop_service() -> None:
-    """Корректно останавливает активный процесс winws (снимает WinDivert)."""
-    global win_proc
+    """Корректно останавливает все активные процессы winws (снимает WinDivert)."""
+    global win_procs
 
-    if win_proc is None:
+    if not win_procs:
         logger.warning("Активный процесс не найден — ничего останавливать.")
         return
 
-    proc = win_proc
-    logger.info("Останавливаем процесс (PID=%s)...", proc.pid)
-    try:
-        if proc.poll() is None:
-            proc.terminate()  # в Windows это TerminateProcess
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning("Процесс не завершился за 5 сек — принудительно.")
-                proc.kill()
-                proc.wait(timeout=3)
-    except Exception as exc:
-        logger.error("Ошибка при остановке процесса: %s", exc)
+    for proc in win_procs:
+        logger.info("Останавливаем процесс (PID=%s)...", proc.pid)
+        try:
+            if proc.poll() is None:
+                proc.terminate()  # в Windows это TerminateProcess
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Процесс не завершился за 5 сек — принудительно.")
+                    proc.kill()
+                    proc.wait(timeout=3)
+        except Exception as exc:
+            logger.error("Ошибка при остановке процесса: %s", exc)
 
-    win_proc = None
+    win_procs = []
     logger.info("Обход остановлен, драйвер WinDivert снят.")
 
 
