@@ -295,19 +295,24 @@ def humanize_size(num: float) -> str:
     return f"{num:.1f} TB"
 
 
-def download_file(url: str, dest: Path) -> None:
-    """Скачивает файл по URL в dest, показывая индикатор прогресса."""
-    with requests.get(url, stream=True, timeout=90, headers=GITHUB_HEADERS) as resp:
+def download_file(url: str, dest: Path, *, is_asset: bool = False) -> None:
+    """Скачивает файл по URL в dest, показывая индикатор прогресса.
+
+    is_asset=True: URL ведёт на ассет релиза через API GitHub, поэтому
+    требуется заголовок Accept: application/octet-stream, иначе GitHub
+    вернёт описание ассета в JSON вместо самого файла.
+    """
+    headers = dict(GITHUB_HEADERS)
+    if is_asset:
+        headers["Accept"] = "application/octet-stream"
+    with requests.get(url, stream=True, timeout=(20, 60), headers=headers) as resp:
         resp.raise_for_status()
         total = int(resp.headers.get("Content-Length", 0))
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
-            TextColumn(
-                "{task.fields[got]} из {task.fields[all]}",
-                table_column=Table(show_header=False, box=None),
-            ),
+            TextColumn("{task.fields[got]} из {task.fields[all]}"),
             TimeRemainingColumn(),
             console=console,
         ) as progress:
@@ -383,14 +388,44 @@ def download_core() -> None:
         logger.info("Запрашиваем последний релиз %s...", CORE_REPO)
         resp = requests.get(GITHUB_API_LATEST, headers=GITHUB_HEADERS, timeout=20)
         resp.raise_for_status()
-        tag = resp.json()["tag_name"]
+        release = resp.json()
+        tag = release["tag_name"]
 
-        zip_url = ZIP_URL_TEMPLATE.format(tag=tag)
+        # Формируем список кандидатов для скачивания и пробуем их по очереди:
+        #   1) ассет релиза напрямую через api.github.com (обходит блокировку
+        #      github.com — DPI обычно не трогает этот домен);
+        #   2) обычный URL github.com/releases/download/...
+        # При нестабильном интернете один из источников обязательно сработает.
+        zip_asset = next(
+            (a for a in release["assets"] if a["name"].lower().endswith(".zip")),
+            None,
+        )
+        if zip_asset is None:
+            raise RuntimeError("В релизе не найден zip-ассет")
+        download_sources: List[tuple[str, bool]] = [
+            (zip_asset["url"], True),                    # через API (oktet-stream)
+            (ZIP_URL_TEMPLATE.format(tag=tag), False),   # напрямую с github.com
+        ]
+
         with tempfile.TemporaryDirectory(prefix="zapretik_") as tmp:
             tmp_p = Path(tmp)
             zip_path = tmp_p / "bundle.zip"
-            logger.info("Скачиваем бандл версии %s...", tag)
-            download_file(zip_url, zip_path)
+
+            # Пробуем каждый источник, пока не скачается целый файл
+            ok = False
+            for url, is_asset in download_sources:
+                try:
+                    logger.info("Пробуем источник: %s", url)
+                    download_file(url, zip_path, is_asset=is_asset)
+                    if zip_path.stat().st_size > 0:
+                        ok = True
+                        break
+                except Exception as exc:
+                    logger.warning("Источник недоступен: %s", exc)
+                    if zip_path.exists():
+                        zip_path.unlink()
+            if not ok:
+                raise RuntimeError("Все источники скачивания недоступны")
 
             extract = tmp_p / "unzipped"
             extract.mkdir(exist_ok=True)
