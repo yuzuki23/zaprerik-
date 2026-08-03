@@ -141,7 +141,7 @@ def _chain_general(dpi: Sequence[str]) -> List[str]:
 
 
 def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
-    """Общие UDP-цепочки — 1:1 как в general.bat у flowseal.
+    """Общие UDP-цепочки — как в general.bat у flowseal (голосовой фейк из 1.9.9d).
 
     voice_ports — диапазон портов, к которому применяется подмена голосовых
     пакетов Discord. По умолчанию это весь голосовой диапазон
@@ -158,12 +158,16 @@ def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
         "--dpi-desync-repeats=6",
         f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
         "--new",
-        # Голосовые UDP-каналы Discord (STUN) — подмена пакетов
+        # Голосовые UDP-каналы Discord (STUN) — подмена пакетов.
+        # ВАЖНО: используем фейк quic_initial_dbankcloud_ru.bin как в 1.9.9d.
+        # В 1.10.0 flowseal заменил его на ACTIVE_DISCORD_UDP.bin (@V3nilla) —
+        # после этого массово жаловались, что собеседника не слышно (та же
+        # регрессия, что чинили в 1.9.3). Возврат на 1.9.9d-фейк.
         f"--filter-udp={voice_ports}",
         "--filter-l7=discord,stun",
         "--dpi-desync=fake",
-        f"--dpi-desync-fake-discord={_bin('ACTIVE_DISCORD_UDP.bin')}",
-        f"--dpi-desync-fake-stun={_bin('ACTIVE_DISCORD_UDP.bin')}",
+        f"--dpi-desync-fake-discord={_bin('quic_initial_dbankcloud_ru.bin')}",
+        f"--dpi-desync-fake-stun={_bin('quic_initial_dbankcloud_ru.bin')}",
         "--dpi-desync-repeats=6",
         "--new",
     ]
