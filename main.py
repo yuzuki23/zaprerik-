@@ -140,13 +140,13 @@ def _chain_general(dpi: Sequence[str]) -> List[str]:
 
 
 def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
-    """Общие UDP-цепочки (QUIC Discord/YouTube + голосовые каналы STUN).
+    """Общие UDP-цепочки — 1:1 как в general.bat у flowseal.
 
     voice_ports — диапазон портов, к которому применяется подмена голосовых
     пакетов Discord. По умолчанию это весь голосовой диапазон
-    (STUN 19294-19344 + медиа/RTP 50000-50100). Для стратегии Voice Fix
-    указывается только STUN-диапазон: медиа-порты остаются нетронутыми,
-    что чинит односторонний звук (тебя не слышно в звонке).
+    (STUN 19294-19344 + медиа/RTP 50000-50100). Медиа-порты фейкаются
+    обязательно: именно фейк маскирует апкаст голоса под "не-RTP", иначе
+    DPI режет исходящий звук и собеседники тебя не слышат.
     """
     return [
         # UDP-трафик Discord/YouTube (QUIC) — подмена пакетов
@@ -366,10 +366,10 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
         + _chain_general(_EXP_GENERAL),
     },
     "V": {
-        "name": "Voice Fix (Discord звонки)",
-        "desc": "Не трогает медиа-порты 50000-50100 — чинит односторонний звук.",
+        "name": "Discord Voice (Flowseal)",
+        "desc": "UDP как в general.bat: фейк STUN 19294-19344 + медиа 50000-50100 (голос-апкаст).",
         "args": WF_COMMON
-        + _common_udp(voice_ports="19294-19344")
+        + _common_udp()
         + _chain_discord_media(_MULTISPLIT_681)
         + _chain_google(_MULTISPLIT_681)
         + _chain_general([
