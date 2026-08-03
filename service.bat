@@ -1024,8 +1024,26 @@ chcp 437 > nul
 cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
-set "hostsUrl=https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts"
 set "localHosts=%~dp0zapret-hosts.txt"
+
+if exist "%localHosts%" (
+    echo Local hosts file found (all Discord regions included).
+    echo Applying entries to system hosts...
+    python "%~dp0main.py" --install-hosts
+    if !errorlevel! equ 0 (
+        call :PrintGreen "Hosts file updated successfully"
+        ipconfig /flushdns >nul 2>&1
+        echo:
+        call :PrintYellow "Fully restart Discord, then join a voice channel."
+    ) else (
+        call :PrintRed "Failed to update hosts. Run service.bat as administrator."
+    )
+    pause
+    goto menu
+)
+
+call :PrintYellow "Local hosts file not found, downloading from repository..."
+set "hostsUrl=https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts"
 set "tempFile=%TEMP%\zapret_hosts.txt"
 set "needsUpdate=0"
 
@@ -1044,18 +1062,8 @@ if exist "%SystemRoot%\System32\curl.exe" (
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
 )
 if not exist "%tempFile%" (
-    call :PrintYellow "Download failed, using local copy %localHosts%"
-    if exist "%localHosts%" (
-        copy /y "%localHosts%" "%tempFile%" >nul
-    ) else (
-        call :PrintRed "Local hosts file not found and download failed"
-        call :PrintYellow "Copy hosts file manually from %hostsUrl%"
-        pause
-        goto menu
-    )
-)
-if not exist "%tempFile%" (
-    call :PrintRed "Failed to get hosts file"
+    call :PrintRed "Failed to download hosts file from repository"
+    call :PrintYellow "Copy hosts file manually from %hostsUrl%"
     pause
     goto menu
 )
@@ -1085,7 +1093,7 @@ if "%needsUpdate%"=="1" (
     echo:
     call :PrintYellow "Hosts file needs to be updated"
     call :PrintYellow "Please manually copy the content from the downloaded file to your hosts file"
-    
+
     start notepad "%tempFile%"
     explorer /select,"%hostsFile%"
 ) else (

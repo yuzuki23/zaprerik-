@@ -761,7 +761,7 @@ def print_menu() -> None:
         table.add_row(key, strat["name"], strat["desc"])
     table.add_row("S", "Остановить сервис", "Снять фильтры WinDivert")
     table.add_row("D", "Диагностика", "Показать состояние обхода и голосового соединения")
-    table.add_row("H", "Установить hosts", "Применить записи Discord voice (finland) в системный hosts")
+    table.add_row("H", "Установить hosts", "Применить записи Discord voice (все регионы) в системный hosts")
     table.add_row("R", "Переустановить ядро", "Скачать заново и распаковать")
     table.add_row("0", "Выход", "Завершить Zapretik")
     console.print(table)
@@ -853,7 +853,7 @@ def _system_hosts_path() -> Path:
     return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc" / "hosts"
 
 
-def install_hosts() -> None:
+def install_hosts(interactive: bool = True) -> None:
     """Применяет finland*.discord.media из zapret-hosts.txt в системный hosts.
 
     Без этих записей голосовой сервер Discord (finlandNNNN.discord.media)
@@ -863,7 +863,8 @@ def install_hosts() -> None:
     src = BASE_DIR / "zapret-hosts.txt"
     if not src.exists():
         logger.error("Не найден локальный файл записей: %s", src)
-        input("Нажмите Enter, чтобы вернуться в меню...")
+        if interactive:
+            input("Нажмите Enter, чтобы вернуться в меню...")
         return
 
     entries = src.read_text(encoding="utf-8", errors="replace").strip()
@@ -906,16 +907,18 @@ def install_hosts() -> None:
         hosts_path.write_text(new, encoding="utf-8")
     except Exception as exc:
         logger.error("Не удалось записать hosts (нужны права администратора): %s", exc)
-        input("Нажмите Enter, чтобы вернуться в меню...")
+        if interactive:
+            input("Нажмите Enter, чтобы вернуться в меню...")
         return
 
     subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
     logger.info("Hosts обновлён: добавлено %d записей finland*.discord.media", entries.count("finland"))
-    console.print(
-        "[bold green]Hosts установлен. Теперь ПОЛНОСТЬЮ перезапусти Discord "
-        "и зайди в звонок.[/bold green]"
-    )
-    input("Нажмите Enter, чтобы вернуться в меню...")
+    if interactive:
+        console.print(
+            "[bold green]Hosts установлен. Теперь ПОЛНОСТЬЮ перезапусти Discord "
+            "и зайди в звонок.[/bold green]"
+        )
+        input("Нажмите Enter, чтобы вернуться в меню...")
 
 
 # --------------------------------------------------------------------------- #
@@ -963,6 +966,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     try:
+        if "--install-hosts" in sys.argv:
+            setup_logging()
+            install_hosts(interactive=False)
+            sys.exit(0)
         # Обработчик прерывания; также перехватываем в главном цикле.
         signal.signal(signal.SIGINT, lambda s, f: handle_interrupt())
         main()
