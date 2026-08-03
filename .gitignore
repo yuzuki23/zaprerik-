@@ -3,3 +3,4 @@ __pycache__/
 bin/
 lists/
 zapretik.log
+.deps_ok
