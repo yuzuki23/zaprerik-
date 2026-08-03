@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Артефакты Zapretik (скачиваются автоматически при первом запуске)
+winws.exe
+WinDivert.dll
+WinDivert64.sys
+*.log
