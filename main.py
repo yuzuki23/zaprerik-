@@ -139,8 +139,15 @@ def _chain_general(dpi: Sequence[str]) -> List[str]:
     ]
 
 
-def _common_udp() -> List[str]:
-    """Общие UDP-цепочки (QUIC Discord/YouTube + голосовые каналы STUN)."""
+def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
+    """Общие UDP-цепочки (QUIC Discord/YouTube + голосовые каналы STUN).
+
+    voice_ports — диапазон портов, к которому применяется подмена голосовых
+    пакетов Discord. По умолчанию это весь голосовой диапазон
+    (STUN 19294-19344 + медиа/RTP 50000-50100). Для стратегии Voice Fix
+    указывается только STUN-диапазон: медиа-порты остаются нетронутыми,
+    что чинит односторонний звук (тебя не слышно в звонке).
+    """
     return [
         # UDP-трафик Discord/YouTube (QUIC) — подмена пакетов
         "--filter-udp=443",
@@ -151,7 +158,7 @@ def _common_udp() -> List[str]:
         f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
         "--new",
         # Голосовые UDP-каналы Discord (STUN) — подмена пакетов
-        "--filter-udp=19294-19344,50000-50100",
+        f"--filter-udp={voice_ports}",
         "--filter-l7=discord,stun",
         "--dpi-desync=fake",
         f"--dpi-desync-fake-discord={_bin('ACTIVE_DISCORD_UDP.bin')}",
@@ -357,6 +364,20 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
         + _chain_discord_media(_EXP_DISCORD)
         + _chain_google(_EXP_GOOGLE)
         + _chain_general(_EXP_GENERAL),
+    },
+    "V": {
+        "name": "Voice Fix (Discord звонки)",
+        "desc": "Не трогает медиа-порты 50000-50100 — чинит односторонний звук.",
+        "args": WF_COMMON
+        + _common_udp(voice_ports="19294-19344")
+        + _chain_discord_media(_MULTISPLIT_681)
+        + _chain_google(_MULTISPLIT_681)
+        + _chain_general([
+            "--dpi-desync=multisplit",
+            "--dpi-desync-split-seqovl=568",
+            "--dpi-desync-split-pos=1",
+            f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_4pda_to.bin')}",
+        ]),
     },
 }
 
