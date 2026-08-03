@@ -108,54 +108,170 @@ def _hostlist_excl(path: str) -> str:
     return f"--hostlist-exclude={path}"
 
 
+def _chain_discord_media(dpi: Sequence[str]) -> List[str]:
+    """Цепочка для трафика discord.media на нестандартных портах."""
+    return [
+        "--filter-tcp=2053,2083,2087,2096,8443",
+        "--hostlist-domains=discord.media",
+        *list(dpi),
+        "--new",
+    ]
+
+
+def _chain_google(dpi: Sequence[str]) -> List[str]:
+    """Цепочка для YouTube/Google на TCP 443."""
+    return [
+        "--filter-tcp=443",
+        _hostlist(_lst("list-google.txt")),
+        "--ip-id=zero",
+        *list(dpi),
+        "--new",
+    ]
+
+
+def _chain_general(dpi: Sequence[str]) -> List[str]:
+    """Цепочка для остальных доменов из общего списка (идёт последней)."""
+    return [
+        "--filter-tcp=80,443",
+        _hostlist(_lst("list-general.txt")),
+        _hostlist_excl(_lst("list-exclude.txt")),
+        *list(dpi),
+    ]
+
+
+def _common_udp() -> List[str]:
+    """Общие UDP-цепочки (QUIC Discord/YouTube + голосовые каналы STUN)."""
+    return [
+        # UDP-трафик Discord/YouTube (QUIC) — подмена пакетов
+        "--filter-udp=443",
+        _hostlist(_lst("list-general.txt")),
+        _hostlist_excl(_lst("list-exclude.txt")),
+        "--dpi-desync=fake",
+        "--dpi-desync-repeats=6",
+        f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
+        "--new",
+        # Голосовые UDP-каналы Discord (STUN) — подмена пакетов
+        "--filter-udp=19294-19344,50000-50100",
+        "--filter-l7=discord,stun",
+        "--dpi-desync=fake",
+        f"--dpi-desync-fake-discord={_bin('ACTIVE_DISCORD_UDP.bin')}",
+        f"--dpi-desync-fake-stun={_bin('ACTIVE_DISCORD_UDP.bin')}",
+        "--dpi-desync-repeats=6",
+        "--new",
+    ]
+
+
+# Библиотека стратегий из проекта flowseal/zapret-discord-youtube.
+# Каждая стратегия = общий UDP-блок + три TCP-цепочки (discord.media,
+# YouTube/Google, общий список). Цепочки различаются только параметрами
+# десинхронизации DPI, поэтому сведены в компактные списки ниже.
+_MULTISPLIT_681 = [
+    "--dpi-desync=multisplit",
+    "--dpi-desync-split-seqovl=681",
+    "--dpi-desync-split-pos=1",
+    f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_www_google_com.bin')}",
+]
+
+_FAKEDSPLIT_GOOGLE = [
+    "--dpi-desync=fake,fakedsplit",
+    "--dpi-desync-repeats=6",
+    "--dpi-desync-fooling=ts",
+    "--dpi-desync-fakedsplit-pattern=0x00",
+    f"--dpi-desync-fake-tls={_bin('tls_clienthello_www_google_com.bin')}",
+]
+
+_FAKEDSPLIT_GENERAL = _FAKEDSPLIT_GOOGLE + [
+    f"--dpi-desync-fake-http={_bin('tls_clienthello_max_ru.bin')}",
+]
+
+_MULTISPLIT_652 = [
+    "--dpi-desync=multisplit",
+    "--dpi-desync-split-seqovl=652",
+    "--dpi-desync-split-pos=2",
+    f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_www_google_com.bin')}",
+]
+
+_HOSTFAKESPLIT_GOOGLE = [
+    "--dpi-desync=fake,hostfakesplit",
+    "--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com",
+    "--dpi-desync-hostfakesplit-mod=host=www.google.com,altorder=1",
+    "--dpi-desync-fooling=ts",
+]
+
+_HOSTFAKESPLIT_YARU = [
+    "--dpi-desync=fake,hostfakesplit",
+    "--dpi-desync-fake-tls-mod=rnd,dupsid,sni=ya.ru",
+    "--dpi-desync-hostfakesplit-mod=host=ya.ru,altorder=1",
+    "--dpi-desync-fooling=ts",
+    f"--dpi-desync-fake-http={_bin('tls_clienthello_max_ru.bin')}",
+]
+
+_BADSEQ_1000 = [
+    "--dpi-desync=fake,multisplit",
+    "--dpi-desync-repeats=6",
+    "--dpi-desync-fooling=badseq",
+    "--dpi-desync-badseq-increment=1000",
+    f"--dpi-desync-fake-tls={_bin('tls_clienthello_www_google_com.bin')}",
+]
+
+_BADSEQ_1000_GENERAL = _BADSEQ_1000 + [
+    f"--dpi-desync-fake-http={_bin('tls_clienthello_max_ru.bin')}",
+]
+
+_SIMPLE_BADSEQ_2 = [
+    "--dpi-desync=fake",
+    "--dpi-desync-repeats=6",
+    "--dpi-desync-fooling=badseq",
+    "--dpi-desync-badseq-increment=2",
+    f"--dpi-desync-fake-tls={_bin('tls_clienthello_www_google_com.bin')}",
+]
+
+_SIMPLE_BADSEQ_2_GENERAL = _SIMPLE_BADSEQ_2 + [
+    f"--dpi-desync-fake-http={_bin('tls_clienthello_max_ru.bin')}",
+]
+
+_EXP_DISCORD = [
+    "--dpi-desync=fake,multisplit",
+    "--dpi-desync-split-seqovl=681",
+    "--dpi-desync-split-pos=1",
+    "--dpi-desync-fooling=ts",
+    "--dpi-desync-repeats=8",
+    f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_www_google_com.bin')}",
+    f"--dpi-desync-fake-tls={_bin('tls_clienthello_www_google_com.bin')}",
+]
+
+_EXP_GOOGLE = [
+    "--dpi-desync=hostfakesplit",
+    "--dpi-desync-fooling=ts",
+    "--dpi-desync-hostfakesplit-mod=host=www.google.com",
+]
+
+_EXP_GENERAL = [
+    "--dpi-desync=fake,multisplit",
+    "--dpi-desync-split-seqovl=480",
+    "--dpi-desync-split-pos=1",
+    "--dpi-desync-fooling=ts",
+    "--dpi-desync-repeats=4",
+    f"--dpi-desync-split-seqovl-pattern={_bin('stun2.bin')}",
+    f"--dpi-desync-fake-tls={_bin('tls_clienthello_max_ru.bin')}",
+    f"--dpi-desync-fake-http={_bin('tls_clienthello_max_ru.bin')}",
+]
+
+
 STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
     "1": {
         "name": "Discord + YouTube (Стандарт)",
-        "desc": "Сбалансированный multisplit-обход для Discord и YouTube.",
+        "desc": "Сбалансированный multisplit-обход для Discord и YouTube (general.bat).",
         "args": WF_COMMON
-        + [
-            # UDP-трафик Discord/YouTube (QUIC) — подмена пакетов
-            "--filter-udp=443",
-            _hostlist(_lst("list-general.txt")),
-            _hostlist_excl(_lst("list-exclude.txt")),
-            "--dpi-desync=fake",
-            "--dpi-desync-repeats=6",
-            f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
-            "--new",
-            # Голосовые UDP-каналы Discord (STUN) — подмена пакетов
-            "--filter-udp=19294-19344,50000-50100",
-            "--filter-l7=discord,stun",
-            "--dpi-desync=fake",
-            f"--dpi-desync-fake-discord={_bin('ACTIVE_DISCORD_UDP.bin')}",
-            f"--dpi-desync-fake-stun={_bin('ACTIVE_DISCORD_UDP.bin')}",
-            "--dpi-desync-repeats=6",
-            "--new",
-            # Discord media по нестандартным портам — multisplit
-            "--filter-tcp=2053,2083,2087,2096,8443",
-            "--hostlist-domains=discord.media",
-            "--dpi-desync=multisplit",
-            "--dpi-desync-split-seqovl=681",
-            "--dpi-desync-split-pos=1",
-            f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_www_google_com.bin')}",
-            "--new",
-            # YouTube TCP/443 — multisplit + обнуление IP ID
-            "--filter-tcp=443",
-            _hostlist(_lst("list-google.txt")),
-            "--ip-id=zero",
-            "--dpi-desync=multisplit",
-            "--dpi-desync-split-seqovl=681",
-            "--dpi-desync-split-pos=1",
-            f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_www_google_com.bin')}",
-            "--new",
-            # Остальные домены из общего списка
-            "--filter-tcp=80,443",
-            _hostlist(_lst("list-general.txt")),
-            _hostlist_excl(_lst("list-exclude.txt")),
+        + _common_udp()
+        + _chain_discord_media(_MULTISPLIT_681)
+        + _chain_google(_MULTISPLIT_681)
+        + _chain_general([
             "--dpi-desync=multisplit",
             "--dpi-desync-split-seqovl=568",
             "--dpi-desync-split-pos=1",
             f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_4pda_to.bin')}",
-        ],
+        ]),
     },
     "2": {
         "name": "Только YouTube (Агрессивный)",
@@ -188,17 +304,61 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
             "--dpi-desync-split-pos=1",
         ],
     },
+    "4": {
+        "name": "ALT1 (fake + fakedsplit)",
+        "desc": "Фейк + разделение пакетов на фрагменты (general (ALT).bat).",
+        "args": WF_COMMON
+        + _common_udp()
+        + _chain_discord_media(_FAKEDSPLIT_GOOGLE)
+        + _chain_google(_FAKEDSPLIT_GOOGLE)
+        + _chain_general(_FAKEDSPLIT_GENERAL),
+    },
+    "5": {
+        "name": "ALT2 (multisplit pos=2)",
+        "desc": "Мультисплит с разделением на 2 позиции (general (ALT2).bat).",
+        "args": WF_COMMON
+        + _common_udp()
+        + _chain_discord_media(_MULTISPLIT_652)
+        + _chain_google(_MULTISPLIT_652)
+        + _chain_general(_MULTISPLIT_652),
+    },
+    "6": {
+        "name": "ALT3 (hostfakesplit)",
+        "desc": "Подмена хоста в ClientHello (general (ALT3).bat).",
+        "args": WF_COMMON
+        + _common_udp()
+        + _chain_discord_media(_HOSTFAKESPLIT_GOOGLE)
+        + _chain_google(_HOSTFAKESPLIT_GOOGLE)
+        + _chain_general(_HOSTFAKESPLIT_YARU),
+    },
+    "7": {
+        "name": "ALT4 (fake + badseq)",
+        "desc": "Фейк + битый порядок пакетов +1000 (general (ALT4).bat).",
+        "args": WF_COMMON
+        + _common_udp()
+        + _chain_discord_media(_BADSEQ_1000)
+        + _chain_google(_BADSEQ_1000)
+        + _chain_general(_BADSEQ_1000_GENERAL),
+    },
+    "8": {
+        "name": "SIMPLE FAKE",
+        "desc": "Простой фейк + битый порядок +2 (general (SIMPLE FAKE ALT).bat).",
+        "args": WF_COMMON
+        + _common_udp()
+        + _chain_discord_media(_SIMPLE_BADSEQ_2)
+        + _chain_google(_SIMPLE_BADSEQ_2)
+        + _chain_general(_SIMPLE_BADSEQ_2_GENERAL),
+    },
+    "9": {
+        "name": "EXP (hostfakesplit+multisplit)",
+        "desc": "Экспериментальная смесь hostfakesplit и multisplit (general (EXP).bat).",
+        "args": WF_COMMON
+        + _common_udp()
+        + _chain_discord_media(_EXP_DISCORD)
+        + _chain_google(_EXP_GOOGLE)
+        + _chain_general(_EXP_GENERAL),
+    },
 }
-
-
-def _hostlist(path: str) -> str:
-    """Аргумент --hostlist для winws."""
-    return f"--hostlist={path}"
-
-
-def _hostlist_excl(path: str) -> str:
-    """Аргумент --hostlist-exclude для winws."""
-    return f"--hostlist-exclude={path}"
 
 
 # --------------------------------------------------------------------------- #
@@ -551,8 +711,8 @@ def print_menu() -> None:
     table.add_column("Описание", style="dim")
     for key, strat in STRATEGIES.items():
         table.add_row(key, strat["name"], strat["desc"])
-    table.add_row("4", "Остановить сервис", "Снять фильтры WinDivert")
-    table.add_row("9", "Переустановить ядро", "Скачать заново и распаковать")
+    table.add_row("S", "Остановить сервис", "Снять фильтры WinDivert")
+    table.add_row("R", "Переустановить ядро", "Скачать заново и распаковать")
     table.add_row("0", "Выход", "Завершить Zapretik")
     console.print(table)
 
@@ -582,9 +742,9 @@ def main() -> None:
 
         if choice in STRATEGIES:
             run_strategy(choice, STRATEGIES[choice])
-        elif choice == "4":
+        elif choice.lower() == "s":
             stop_service()
-        elif choice == "9":
+        elif choice.lower() == "r":
             if BIN_DIR.exists():
                 shutil.rmtree(BIN_DIR, ignore_errors=True)
             download_core()
