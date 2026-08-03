@@ -284,6 +284,7 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
         "name": "Только YouTube (Агрессивный)",
         "desc": "FAKE TLS AUTO + рассинхронизация пакетов (макс. маскировка).",
         "args": WF_COMMON
+        + _common_udp()
         + [
             "--filter-tcp=443",
             _hostlist(_lst("list-google.txt")),
@@ -299,8 +300,9 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
     },
     "3": {
         "name": "Безопасный режим (Медленный)",
-        "desc": "Только фрагментация TLS без фейковых пакетов.",
+        "desc": "TCP — только фрагментация TLS; UDP — общий фейк как у flowseal.",
         "args": WF_COMMON
+        + _common_udp()
         + [
             "--filter-tcp=443",
             _hostlist(_lst("list-general.txt")),
