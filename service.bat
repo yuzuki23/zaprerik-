@@ -1025,6 +1025,7 @@ cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 set "hostsUrl=https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts"
+set "localHosts=%~dp0zapret-hosts.txt"
 set "tempFile=%TEMP%\zapret_hosts.txt"
 set "needsUpdate=0"
 
@@ -1043,8 +1044,18 @@ if exist "%SystemRoot%\System32\curl.exe" (
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
 )
 if not exist "%tempFile%" (
-    call :PrintRed "Failed to download hosts file from repository"
-    call :PrintYellow "Copy hosts file manually from %hostsUrl%"
+    call :PrintYellow "Download failed, using local copy %localHosts%"
+    if exist "%localHosts%" (
+        copy /y "%localHosts%" "%tempFile%" >nul
+    ) else (
+        call :PrintRed "Local hosts file not found and download failed"
+        call :PrintYellow "Copy hosts file manually from %hostsUrl%"
+        pause
+        goto menu
+    )
+)
+if not exist "%tempFile%" (
+    call :PrintRed "Failed to get hosts file"
     pause
     goto menu
 )
