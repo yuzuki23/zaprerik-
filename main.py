@@ -141,7 +141,7 @@ def _chain_general(dpi: Sequence[str]) -> List[str]:
 
 
 def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
-    """Общие UDP-цепочки — как в general.bat у flowseal (голосовой фейк из 1.9.9d).
+    """Общие UDP-цепочки — 1:1 как в general.bat у flowseal.
 
     voice_ports — диапазон портов, к которому применяется подмена голосовых
     пакетов Discord. По умолчанию это весь голосовой диапазон
@@ -159,40 +159,13 @@ def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
         f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
         "--new",
         # Голосовые UDP-каналы Discord (STUN) — подмена пакетов.
-        # ВАЖНО: используем фейк quic_initial_dbankcloud_ru.bin как в 1.9.9d.
-        # В 1.10.0 flowseal заменил его на ACTIVE_DISCORD_UDP.bin (@V3nilla) —
-        # после этого массово жаловались, что собеседника не слышно (та же
-        # регрессия, что чинили в 1.9.3). Возврат на 1.9.9d-фейк.
+        # Официальный фейк flowseal 1.10.0 (ACTIVE_DISCORD_UDP.bin, @V3nilla).
         f"--filter-udp={voice_ports}",
         "--filter-l7=discord,stun",
         "--dpi-desync=fake",
-        f"--dpi-desync-fake-discord={_bin('quic_initial_dbankcloud_ru.bin')}",
-        f"--dpi-desync-fake-stun={_bin('quic_initial_dbankcloud_ru.bin')}",
+        f"--dpi-desync-fake-discord={_bin('ACTIVE_DISCORD_UDP.bin')}",
+        f"--dpi-desync-fake-stun={_bin('ACTIVE_DISCORD_UDP.bin')}",
         "--dpi-desync-repeats=6",
-        "--new",
-    ]
-
-
-def _common_udp_soft() -> List[str]:
-    """Голособезопасный UDP (по рекомендации "Discord Voice Fix").
-
-    Голос — это UDP/VoIP, ему важна стабильность, а не агрессивный обход.
-    Вместо фейковых пакетов (которые могут ронять голос) — только лёгкая
-    десинхронизация disorder, без fake и без повторных пакетов.
-    """
-    return [
-        # QUIC (443) — обычная подмена, голос по нему не идёт
-        "--filter-udp=443",
-        _hostlist(_lst("list-general.txt")),
-        _hostlist_excl(_lst("list-exclude.txt")),
-        "--dpi-desync=fake",
-        "--dpi-desync-repeats=6",
-        f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
-        "--new",
-        # Голосовые UDP-порты Discord — только мягкий disorder, без fake
-        f"--filter-udp=19294-19344,50000-50100",
-        "--filter-l7=discord,stun",
-        "--dpi-desync=disorder",
         "--new",
     ]
 
@@ -395,55 +368,6 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
         + _chain_discord_media(_EXP_DISCORD)
         + _chain_google(_EXP_GOOGLE)
         + _chain_general(_EXP_GENERAL),
-    },
-    "V": {
-        "name": "Discord Voice Fix (мягкий UDP)",
-        "desc": "UDP голоса — только disorder без fake; TCP — обычный multisplit.",
-        "args": WF_COMMON
-        + _common_udp_soft()
-        + _chain_discord_media(_MULTISPLIT_681)
-        + _chain_google(_MULTISPLIT_681)
-        + _chain_general([
-            "--dpi-desync=multisplit",
-            "--dpi-desync-split-seqovl=568",
-            "--dpi-desync-split-pos=1",
-            f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_4pda_to.bin')}",
-        ]),
-    },
-    "X": {
-        "name": "Discord Full (Split TCP/UDP)",
-        "desc": "Два процесса: TCP — агрессивный; UDP — мягкий disorder + широкие порты.",
-        "processes": [
-            # --- Процесс 1: только TCP (HTTPS/чат/сайты) ---
-            [
-                "--wf-tcp=80,443,2053,2083,2087,2096,8443",
-                *_chain_discord_media(_MULTISPLIT_681),
-                *_chain_google(_MULTISPLIT_681),
-                *_chain_general([
-                    "--dpi-desync=multisplit",
-                    "--dpi-desync-split-seqovl=568",
-                    "--dpi-desync-split-pos=1",
-                    f"--dpi-desync-split-seqovl-pattern={_bin('tls_clienthello_4pda_to.bin')}",
-                ]),
-            ],
-            # --- Процесс 2: только UDP (голос/QUIC), мягко ---
-            [
-                "--wf-udp=443,19294-19344,50000-50100,49152-65535",
-                # QUIC Discord/YouTube
-                "--filter-udp=443",
-                _hostlist(_lst("list-general.txt")),
-                _hostlist_excl(_lst("list-exclude.txt")),
-                "--dpi-desync=fake",
-                "--dpi-desync-repeats=6",
-                f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
-                "--new",
-                # Голосовые UDP-порты Discord: мягкий disorder без fake,
-                # покрытие включает эфемерный диапазон на случай нестандартных портов
-                "--filter-udp=19294-19344,50000-50100,49152-65535",
-                "--filter-l7=discord,stun",
-                "--dpi-desync=disorder",
-            ],
-        ],
     },
 }
 
