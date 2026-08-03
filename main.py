@@ -27,6 +27,7 @@ import logging
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -164,6 +165,30 @@ def _common_udp(voice_ports: str = "19294-19344,50000-50100") -> List[str]:
         f"--dpi-desync-fake-discord={_bin('ACTIVE_DISCORD_UDP.bin')}",
         f"--dpi-desync-fake-stun={_bin('ACTIVE_DISCORD_UDP.bin')}",
         "--dpi-desync-repeats=6",
+        "--new",
+    ]
+
+
+def _common_udp_soft() -> List[str]:
+    """Голособезопасный UDP (по рекомендации "Discord Voice Fix").
+
+    Голос — это UDP/VoIP, ему важна стабильность, а не агрессивный обход.
+    Вместо фейковых пакетов (которые могут ронять голос) — только лёгкая
+    десинхронизация disorder, без fake и без повторных пакетов.
+    """
+    return [
+        # QUIC (443) — обычная подмена, голос по нему не идёт
+        "--filter-udp=443",
+        _hostlist(_lst("list-general.txt")),
+        _hostlist_excl(_lst("list-exclude.txt")),
+        "--dpi-desync=fake",
+        "--dpi-desync-repeats=6",
+        f"--dpi-desync-fake-quic={_bin('quic_initial_www_google_com.bin')}",
+        "--new",
+        # Голосовые UDP-порты Discord — только мягкий disorder, без fake
+        f"--filter-udp=19294-19344,50000-50100",
+        "--filter-l7=discord,stun",
+        "--dpi-desync=disorder",
         "--new",
     ]
 
@@ -368,10 +393,10 @@ STRATEGIES: Dict[str, Dict[str, Sequence[str]]] = {
         + _chain_general(_EXP_GENERAL),
     },
     "V": {
-        "name": "Discord Voice (Flowseal)",
-        "desc": "UDP как в general.bat: фейк STUN 19294-19344 + медиа 50000-50100 (голос-апкаст).",
+        "name": "Discord Voice Fix (мягкий UDP)",
+        "desc": "UDP голоса — только disorder без fake; TCP — обычный multisplit.",
         "args": WF_COMMON
-        + _common_udp()
+        + _common_udp_soft()
         + _chain_discord_media(_MULTISPLIT_681)
         + _chain_google(_MULTISPLIT_681)
         + _chain_general([
@@ -735,9 +760,162 @@ def print_menu() -> None:
     for key, strat in STRATEGIES.items():
         table.add_row(key, strat["name"], strat["desc"])
     table.add_row("S", "Остановить сервис", "Снять фильтры WinDivert")
+    table.add_row("D", "Диагностика", "Показать состояние обхода и голосового соединения")
+    table.add_row("H", "Установить hosts", "Применить записи Discord voice (finland) в системный hosts")
     table.add_row("R", "Переустановить ядро", "Скачать заново и распаковать")
     table.add_row("0", "Выход", "Завершить Zapretik")
     console.print(table)
+
+
+# --------------------------------------------------------------------------- #
+# Диагностика
+# --------------------------------------------------------------------------- #
+
+def _powershell(script: str) -> str:
+    """Выполняет PowerShell-команду и возвращает её stdout (или "")."""
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True, text=True, timeout=60,
+        )
+        return (out.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def diagnostics() -> None:
+    """Собирает данные о состоянии обхода и голосового соединения Discord.
+
+    Вызывается пунктом меню D. Нужно ЗАЙТИ В ЗВОНОК перед запуском,
+    чтобы в разделе 4 появился реальный голосовой endpoint.
+    """
+    console.print(Panel("[bold]Диагностика Zapretik[/bold]", border_style="cyan"))
+
+    console.print("\n[bold cyan]1. Процессы winws.exe:[/bold cyan]")
+    out = _powershell(
+        "Get-Process winws -ErrorAction SilentlyContinue | "
+        "Select-Object Id,StartTime,Path | Format-Table -AutoSize | Out-String"
+    )
+    console.print(out or "[yellow]  winws не запущен[/yellow]")
+
+    console.print("\n[bold cyan]2. DNS (hosts-записи должны резолвиться):[/bold cyan]")
+    for host in ("finland10000.discord.media", "discord.media", "cdn.discordapp.com"):
+        try:
+            ip = socket.gethostbyname(host)
+            console.print(f"  {host} -> {ip}")
+        except Exception as exc:
+            console.print(f"  {host} -> ОШИБКА: {exc}")
+
+    console.print("\n[bold cyan]3. Hosts-файл (нужны записи finland*):[/bold cyan]")
+    hosts_path = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "drivers", "etc", "hosts",
+    )
+    try:
+        with open(hosts_path, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        finland = sum(
+            1 for line in content.splitlines()
+            if "finland" in line.lower() and not line.strip().startswith("#")
+        )
+        console.print(f"  записей finland: {finland}")
+        if finland == 0:
+            console.print("  [red]НЕТ! Запусти пункт H (установить hosts).[/red]")
+    except Exception as exc:
+        console.print(f"  ошибка чтения hosts: {exc}")
+
+    console.print("\n[bold cyan]4. Активные UDP-порты (ЗАЙДИ В ЗВОНОК перед запуском!):[/bold cyan]")
+    udp = _powershell(
+        "Get-NetUDPEndpoint | "
+        "Where-Object {$_.LocalPort -gt 1024 -and $_.LocalAddress -notin '0.0.0.0','127.0.0.1'} | "
+        "Sort-Object LastIncomingData -Descending | "
+        "Select-Object -First 8 LocalAddress,LocalPort,OwningProcess | "
+        "Format-Table -AutoSize | Out-String"
+    )
+    console.print(udp or "[yellow]  нет активных UDP-портов[/yellow]")
+
+    console.print(
+        "\n[dim]Скопируй весь этот вывод и пришли текстом "
+        "(не скриншотом — картинки не читаются).[/dim]"
+    )
+    input("Нажмите Enter, чтобы вернуться в меню...")
+
+
+# --------------------------------------------------------------------------- #
+# Hosts: автоматическое применение записей Discord voice
+# --------------------------------------------------------------------------- #
+
+HOSTS_START = "# BEGIN ZAPRETIK (discord voice, don't edit)"
+HOSTS_END = "# END ZAPRETIK"
+
+
+def _system_hosts_path() -> Path:
+    return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc" / "hosts"
+
+
+def install_hosts() -> None:
+    """Применяет finland*.discord.media из zapret-hosts.txt в системный hosts.
+
+    Без этих записей голосовой сервер Discord (finlandNNNN.discord.media)
+    не резолвится из-за DPI-блокировки DNS — и тебя не слышно в звонке.
+    Делает бэкап, убирает старый блок ZAPRETIK и дописывает новый.
+    """
+    src = BASE_DIR / "zapret-hosts.txt"
+    if not src.exists():
+        logger.error("Не найден локальный файл записей: %s", src)
+        input("Нажмите Enter, чтобы вернуться в меню...")
+        return
+
+    entries = src.read_text(encoding="utf-8", errors="replace").strip()
+    block = f"{HOSTS_START}\n{entries}\n{HOSTS_END}\n"
+    hosts_path = _system_hosts_path()
+
+    try:
+        orig = hosts_path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        orig = ""
+
+    # Бэкап текущего hosts
+    try:
+        (hosts_path.with_suffix(".hosts.bak")).write_text(orig, encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Не удалось создать бэкап hosts: %s", exc)
+
+    # Убираем старый блок ZAPRETIK и чужие записи discord.media/finland
+    kept: List[str] = []
+    in_block = False
+    for line in orig.splitlines():
+        if line.strip() == HOSTS_START:
+            in_block = True
+            continue
+        if line.strip() == HOSTS_END:
+            in_block = False
+            continue
+        if in_block:
+            continue
+        if "discord.media" in line.lower() or "finland" in line.lower():
+            continue
+        kept.append(line)
+
+    new = "\n".join(kept).rstrip()
+    if new:
+        new += "\n"
+    new += "\n" + block
+
+    try:
+        hosts_path.write_text(new, encoding="utf-8")
+    except Exception as exc:
+        logger.error("Не удалось записать hosts (нужны права администратора): %s", exc)
+        input("Нажмите Enter, чтобы вернуться в меню...")
+        return
+
+    subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
+    logger.info("Hosts обновлён: добавлено %d записей finland*.discord.media", entries.count("finland"))
+    console.print(
+        "[bold green]Hosts установлен. Теперь ПОЛНОСТЬЮ перезапусти Discord "
+        "и зайди в звонок.[/bold green]"
+    )
+    input("Нажмите Enter, чтобы вернуться в меню...")
 
 
 # --------------------------------------------------------------------------- #
@@ -767,6 +945,10 @@ def main() -> None:
             run_strategy(choice, STRATEGIES[choice])
         elif choice.lower() == "s":
             stop_service()
+        elif choice.lower() == "d":
+            diagnostics()
+        elif choice.lower() == "h":
+            install_hosts()
         elif choice.lower() == "r":
             if BIN_DIR.exists():
                 shutil.rmtree(BIN_DIR, ignore_errors=True)
