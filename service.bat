@@ -1,5 +1,5 @@
 @echo off
-set "LOCAL_VERSION=1.0.4"
+set "LOCAL_VERSION=1.0.5"
 
 :: External commands
 if "%~1"=="status_zapret" (
@@ -13,7 +13,7 @@ if "%~1"=="check_updates" (
 
     if exist "%~dp0utils\check_updates.enabled" (
         if not "%~2"=="soft" (
-            start /b service check_updates soft
+            start "" /b "%~f0" check_updates soft
         ) else (
             call :service_check_updates soft
         )
