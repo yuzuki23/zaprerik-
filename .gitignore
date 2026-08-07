@@ -221,4 +221,5 @@ __marimo__/
 winws.exe
 WinDivert.dll
 WinDivert64.sys
+cygwin1.dll
 *.log
