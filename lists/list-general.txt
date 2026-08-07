@@ -48,3 +48,8 @@ betterttv.net
 localizeapi.com
 klipy.com
 live-video.net
+pulsesync.dev
+ru-node-1.pulsesync.dev
+worker.pulsesync.dev
+s3.pulsesync.dev
+
