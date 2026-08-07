@@ -1,5 +1,5 @@
 ﻿@echo off
-set "LOCAL_VERSION=1.0.3"
+set "LOCAL_VERSION=1.0.4"
 
 :: External commands
 if "%~1"=="status_zapret" (
@@ -61,13 +61,11 @@ cls
 call :ipset_switch_status
 call :game_switch_status
 call :check_updates_switch_status
-call :get_strategy_name
 
 set "menu_choice=null"
 
 echo.
 echo   ZAPRET SERVICE MANAGER v!LOCAL_VERSION!
-echo.  !CurrentStrategy!
 echo   ----------------------------------------
 echo.
 echo   :: SERVICE

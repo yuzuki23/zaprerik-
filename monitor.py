@@ -93,7 +93,13 @@ def main():
         line = f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
         if not ok:
             alive = winws_alive()
-            restore = restore_discord()
+            if alive == "no" or alive == "?":
+                # winws умер — его и чиним (перезапуск реально нужен)
+                restore = restore_discord()
+            else:
+                # winws жив, но Discord недоступен — это блокировка/маршрут,
+                # перезапуск соединения порвёт и не поможет. Только логируем.
+                restore = "winws жив — блокировка маршрута, не перезапускаю"
             line += f" | winws -> {alive} | autorestart -> {restore}"
             print(RED + "СБОЙ: " + line + RESET, flush=True)
             LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")

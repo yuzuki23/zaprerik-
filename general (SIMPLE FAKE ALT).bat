@@ -2,6 +2,17 @@
 chcp 65001 > nul
 :: 65001 - UTF-8
 
+:: Автозапрос прав администратора
+net file >nul 2>&1
+if %errorlevel% NEQ 0 goto elevate
+goto run
+
+:elevate
+echo Нет прав администратора. Запрашиваю... (подтвердите в окне UAC)
+powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+exit /b
+
+:run
 cd /d "%~dp0"
 call service.bat status_zapret
 call service.bat check_updates
