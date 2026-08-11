@@ -81,10 +81,11 @@ def api(method, url, token, body=None, data_file=None, timeout=120):
 
 def replace_first(path, pattern, repl):
     text = path.read_text(encoding="utf-8-sig")
-    new = re.sub(pattern, repl, text, count=1)
-    if new == text:
+    if not re.search(pattern, text):
         raise RuntimeError(f"паттерн не найден в {path}: {pattern}")
-    path.write_text(new, encoding="utf-8-sig")
+    new = re.sub(pattern, repl, text, count=1)
+    if new != text:
+        path.write_text(new, encoding="utf-8")
 
 
 def main():

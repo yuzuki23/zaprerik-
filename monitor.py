@@ -32,11 +32,23 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — консольные дети н�
 
 def notify(title, text):
     """Системное уведомление Windows при сбое."""
-    ps = (f"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')|Out-Null;"
-          f"$n=New-Object System.Windows.Forms.NotifyIcon;$n.Icon=[System.Drawing.SystemIcons]::Warning;"
-          f"$n.Visible=$true;$n.ShowBalloonTip(12000,'{title}','{text}',"
-          f"[System.Windows.Forms.ToolTipIcon]::Warning)")
-    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+    ps1 = (
+        "Add-Type -AssemblyName System.Windows.Forms\n"
+        "Add-Type -AssemblyName System.Drawing\n"
+        "$n=New-Object System.Windows.Forms.NotifyIcon\n"
+        "$n.Icon=[System.Drawing.SystemIcons]::Warning\n"
+        "$n.Visible=$true\n"
+        f"$n.ShowBalloonTip(15000,'{title}','{text}',[System.Windows.Forms.ToolTipIcon]::Warning)\n"
+        "$t=New-Object System.Windows.Forms.Timer\n"
+        "$t.Interval=16000\n"
+        "$t.Add_Tick({$n.Visible=$false;$n.Dispose();[System.Windows.Forms.Application]::Exit()})\n"
+        "$t.Start()\n"
+        "[System.Windows.Forms.Application]::Run()\n"
+    )
+    path = Path(os.environ.get("TEMP", r"C:\запрет")) / "monitor_notify.ps1"
+    path.write_text(ps1, encoding="utf-8-sig")
+    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                      "-ExecutionPolicy", "Bypass", "-File", str(path)],
                      creationflags=subprocess.CREATE_NO_WINDOW)
 
 

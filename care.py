@@ -57,11 +57,23 @@ SENT = Path(r"C:\запрет\care_sent.txt")
 
 
 def notify(title, text):
-    ps = (f"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')|Out-Null;"
-          f"$n=New-Object System.Windows.Forms.NotifyIcon;$n.Icon=[System.Drawing.SystemIcons]::Information;"
-          f"$n.Visible=$true;$n.ShowBalloonTip(10000,'{title}','{text}',"
-          f"[System.Windows.Forms.ToolTipIcon]::Info)")
-    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+    ps1 = (
+        "Add-Type -AssemblyName System.Windows.Forms\n"
+        "Add-Type -AssemblyName System.Drawing\n"
+        "$n=New-Object System.Windows.Forms.NotifyIcon\n"
+        "$n.Icon=[System.Drawing.SystemIcons]::Information\n"
+        "$n.Visible=$true\n"
+        f"$n.ShowBalloonTip(15000,'{title}','{text}',[System.Windows.Forms.ToolTipIcon]::Info)\n"
+        "$t=New-Object System.Windows.Forms.Timer\n"
+        "$t.Interval=16000\n"
+        "$t.Add_Tick({$n.Visible=$false;$n.Dispose();[System.Windows.Forms.Application]::Exit()})\n"
+        "$t.Start()\n"
+        "[System.Windows.Forms.Application]::Run()\n"
+    )
+    path = Path(os.environ.get("TEMP", r"C:\запрет")) / "care_notify.ps1"
+    path.write_text(ps1, encoding="utf-8-sig")
+    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                      "-ExecutionPolicy", "Bypass", "-File", str(path)],
                      creationflags=subprocess.CREATE_NO_WINDOW)
 
 
@@ -83,11 +95,14 @@ def main():
         key = now.strftime("%H:%M")
         day = now.strftime("%Y-%m-%d")
         if key in SLOTS and not already_sent(day, key):
-            phrases = SLOTS[key]
-            text = phrases[len(str(int(now.timestamp()))) % len(phrases)]
-            notify("Лия: \"коть\"", text)
-            mark_sent(day, key)
-            print(f"{now:%H:%M:%S} отправлено уведомление ({key})", flush=True)
+            try:
+                phrases = SLOTS[key]
+                text = phrases[len(str(int(now.timestamp()))) % len(phrases)]
+                notify("Лия: \"коть\"", text)
+                mark_sent(day, key)
+                print(f"{now:%H:%M:%S} отправлено уведомление ({key})", flush=True)
+            except Exception as e:
+                print(f"{now:%H:%M:%S} ОШИБКА уведомления ({key}): {e}", flush=True)
         time.sleep(30)
 
 
