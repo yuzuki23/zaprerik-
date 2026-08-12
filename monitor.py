@@ -20,12 +20,14 @@ os.system("")  # включаем ANSI-цвета в Windows-терминале
 
 GREEN = "\033[32m"
 RED = "\033[31m"
+YELLOW = "\033[33m"
 RESET = "\033[0m"
 
 LOG = Path(r"C:\запрет\discord_monitor.log")
 STATUS = Path(r"C:\запрет\discord_status.txt")
-URLS = ["https://discord.com/", "https://gateway.discord.gg/",
-        "https://detector404.ru/discord"]
+HEALTH_URLS = ["https://discord.com/", "https://gateway.discord.gg/"]
+# Несколько детекторов: если основной (detector404.ru) ляжет — пробуем запасной.
+DETECTORS = ["https://detector404.ru/discord", "https://www.gstatic.com/generate_204"]
 
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — консольные дети не открывают окно (важно для pythonw)
 
@@ -56,8 +58,8 @@ def notify(title, text):
                      creationflags=subprocess.CREATE_NO_WINDOW)
 
 
-def write_status(ts, codes, extra=""):
-    """Живой статус-файл: показывает текущее состояние Discord, как на detector404."""
+def write_status(ts, codes, detector, detector_src, extra=""):
+    """Живой статус-файл: показывает текущее состояние Discord."""
     discord = codes.get("https://discord.com/", "?")
     if discord == "200":
         verdict = "ВСЁ РАБОТАЕТ"
@@ -65,12 +67,13 @@ def write_status(ts, codes, extra=""):
         verdict = "ЧАСТИЧНЫЙ СБОЙ (часть сервисов лежит)"
     else:
         verdict = "ЛЕЖИТ / НЕ ДОСТУПЕН"
+    det_label = "detector404.ru/discord" if "detector404" in detector_src else detector_src
     lines = [
         f"Discord — живой статус (обновлено: {ts})",
         "==========================================",
         f"discord.com          -> {codes.get('https://discord.com/', '?'):>3}",
         f"gateway.discord.gg   -> {codes.get('https://gateway.discord.gg/', '?'):>3}",
-        f"detector404.ru/discord -> {codes.get('https://detector404.ru/discord', '?'):>3}",
+        f"{det_label:<22} -> {detector:>3}",
         "==========================================",
         "ВЕРДИКТ: " + verdict,
     ]
@@ -83,13 +86,21 @@ def status_api():
     """Парсит официальный статус Discord (discordstatus.com). Возвращает (api, indicator)."""
     try:
         r = subprocess.run(
-            ["curl.exe", "-s", "-m", "25", "https://status.discord.com/api/v2/summary.json"],
-            capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW)
+            ["curl.exe", "-s", "--connect-timeout", "6", "--max-time", "12",
+             "https://status.discord.com/api/v2/summary.json"],
+            capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
         data = json.loads(r.stdout)
-        api = "unknown"
+        api = "none"
         for c in data.get("components", []):
-            if c.get("id") == "rhznvxg4v7yh":  # компонент "API"
+            name = (c.get("name") or "").lower()
+            if "api" in name:  # ищем компонент по имени, а не по хардкод-id
                 api = c.get("status", "unknown")
+                break
+        if api == "none":  # запасной вариант — по старому id
+            for c in data.get("components", []):
+                if c.get("id") == "rhznvxg4v7yh":
+                    api = c.get("status", "unknown")
+                    break
         indicator = data.get("status", {}).get("indicator", "unknown")
         return api, indicator
     except Exception:
@@ -105,6 +116,15 @@ def http(url, timeout=12):
         return (r.stdout or "").strip() or "ERR"
     except Exception as exc:
         return f"ERR {exc}"
+
+
+def check_detector():
+    """Проверяет доступность Discord через один из детекторов (с запасным)."""
+    for url in DETECTORS:
+        code = http(url)
+        if code in ("200", "204"):
+            return code, url
+    return "ERR", DETECTORS[0]
 
 
 def winws_alive():
@@ -180,17 +200,19 @@ def main():
     fail_streak = 0  # подряд идущие «настоящие» сбои (маршрутная блокировка)
     while True:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        codes = {u: http(u) for u in URLS}
+        codes = {u: http(u) for u in HEALTH_URLS}
+        detector, detector_src = check_detector()
         ok = all(c == "200" or (c == "404" and "gateway" in u) for u, c in codes.items())
-        api, indicator = status_api()  # официальный статус Discord (discordstatus.com)
-        disc_gone = api == "major_outage" or indicator in ("major", "minor", "critical")
+        api, indicator = status_api()  # официальный статус Discord (status.discord.com)
+        disc_gone = api in ("major_outage", "partial_outage") or indicator in ("major", "minor", "critical")
         extra = f"discordstatus.com: API={api}, indicator={indicator}"
-        write_status(ts, codes, extra)  # обновляем живой статус-файл
+        write_status(ts, codes, detector, detector_src, extra)  # живой статус-файл
         if was_down and not disc_gone:
             # официальный статус восстановился — радостное уведомление
             notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
         was_down = disc_gone
-        line = f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items()) + f" | api: {api}/{indicator}"
+        line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
+                + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator}")
         if not ok:
             alive = winws_alive()
             if alive == "no" or alive == "?":
@@ -219,10 +241,16 @@ def main():
                         res = restart_zapret_service()
                         line += f" | autorestart -> {res}"
                         fail_streak = 0
-                        notify("Zapret: перезапуск службы", f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд, перезапускаю zapret")
-                    print(RED + "СБОЙ: " + line + RESET, flush=True)
-                    LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
-                    notify("Zapret: Discord недоступен", f"{ts}\nМаршрутная блокировка, продолжается")
+                        print(RED + "СБОЙ: " + line + RESET, flush=True)
+                        LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
+                        notify("Zapret: перезапуск службы",
+                               f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд, перезапускаю zapret")
+                    else:
+                        # пока не набралось 3 подряд — это INFO, не тревога
+                        print(YELLOW + "INFO: " + line + RESET, flush=True)
+                        LOG.open("a", encoding="utf-8").write("INFO " + line + "\n")
+                        notify("Zapret: Discord недоступен",
+                               f"{ts}\nМаршрутная блокировка, продолжается")
         else:
             fail_streak = 0
             print(GREEN + "OK: " + line + " | всё в порядке" + RESET, flush=True)

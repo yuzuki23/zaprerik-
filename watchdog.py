@@ -68,8 +68,13 @@ def log(msg):
 
 
 def start_proc(entry):
-    """Запускает дочерний процесс и возвращает Popen."""
-    cmd = [str(PYTHON), entry["script"]] + entry["args"]
+    """Запускает дочерний процесс и возвращает Popen.
+
+    Скрипт передаётся абсолютным путём (BASE_DIR / script), чтобы перезапуск
+    не зависел от cwd с кириллицей (Python сам резолвит путь через CreateProcessW).
+    """
+    script = BASE_DIR / entry["script"]
+    cmd = [str(PYTHON), str(script)] + entry["args"]
     try:
         proc = subprocess.Popen(
             cmd,
@@ -78,10 +83,10 @@ def start_proc(entry):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        log(f"Старт {entry['name']} (PID={proc.pid}): {entry['script']}")
+        log(f"Старт {entry['name']} (PID={proc.pid}): {script}")
         return proc
     except OSError as exc:
-        log(f"ОШИБКА запуска {entry['name']}: {exc}")
+        log(f"ОШИББКА запуска {entry['name']}: {exc}")
         return None
 
 
