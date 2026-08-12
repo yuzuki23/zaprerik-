@@ -194,3 +194,7 @@ def main():
 
 
 entry_up = {"last_down": None}
+
+
+if __name__ == "__main__":
+    main()
