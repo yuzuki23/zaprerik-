@@ -29,6 +29,10 @@ URLS = ["https://discord.com/", "https://gateway.discord.gg/",
 
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — консольные дети не открывают окно (важно для pythonw)
 
+MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 МБ
+KEEP_LOGS = 3
+RESTART_AFTER_FAILS = 3  # после стольких «настоящих» сбоев подряд — перезапускаем zapret
+
 
 def notify(title, text):
     """Системное уведомление Windows при сбое."""
@@ -113,6 +117,36 @@ def winws_alive():
         return "?"
 
 
+def rotate_log():
+    """Если лог разросся — сдвигает копии (.1, .2, ...) и начинает новый."""
+    if not LOG.exists() or LOG.stat().st_size < MAX_LOG_SIZE:
+        return
+    for i in range(KEEP_LOGS - 1, 0, -1):
+        src = LOG.with_name(f"{LOG.name}.{i}")
+        dst = LOG.with_name(f"{LOG.name}.{i + 1}")
+        if src.exists():
+            dst.write_bytes(src.read_bytes())
+            src.unlink()
+    LOG.with_name(f"{LOG.name}.1").write_bytes(LOG.read_bytes())
+    LOG.write_text("", encoding="utf-8")
+
+
+def restart_zapret_service():
+    """Перезапуск службы zapret (winws) через sc/net."""
+    try:
+        subprocess.run(["net", "stop", "zapret"], capture_output=True, text=True, timeout=30,
+                       creationflags=NO_WINDOW)
+    except Exception:
+        pass
+    time.sleep(2)
+    try:
+        r = subprocess.run(["net", "start", "zapret"], capture_output=True, text=True, timeout=30,
+                           creationflags=NO_WINDOW)
+        return "OK" if r.returncode == 0 else f"FAIL {r.stdout.strip()[-100:]}"
+    except Exception as exc:
+        return f"FAIL {exc}"
+
+
 def restart_zapret():
     """Перезапуск zapret (winws): убить старый процесс и стартовать restart_zapret.bat."""
     try:
@@ -143,6 +177,7 @@ def main():
     interval = int(sys.argv[1]) * 60 if len(sys.argv) > 1 else 120
     print(f"Мониторинг Discord, интервал {interval // 60} мин. Лог: {LOG}")
     was_down = False
+    fail_streak = 0  # подряд идущие «настоящие» сбои (маршрутная блокировка)
     while True:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         codes = {u: http(u) for u in URLS}
@@ -160,6 +195,7 @@ def main():
             alive = winws_alive()
             if alive == "no" or alive == "?":
                 # winws умер — перезапуск и проверка восстановления
+                fail_streak = 0
                 restore = restore_discord()
                 line += f" | winws -> {alive} | autorestart -> {restore}"
                 print(RED + "СБОЙ: " + line + RESET, flush=True)
@@ -170,18 +206,28 @@ def main():
                 time.sleep(5)
                 if http("https://discord.com/") == "200":
                     # сам восстановился — это НЕ сбой, обычная OK-строка
+                    fail_streak = 0
                     print(GREEN + "OK: " + line + " (разовый обрыв, сам ожил)" + RESET, flush=True)
                     LOG.open("a", encoding="utf-8").write(
                         "OK " + line + " (разовый обрыв маршрута, сам восстановился)\n")
                 else:
-                    # держится недоступным дольше — это реальная маршрутная блокировка
-                    line += " | winws жив — маршрутная блокировка, не перезапускаю"
+                    # держится недоступным дольше — реальная маршрутная блокировка
+                    fail_streak += 1
+                    line += f" | winws жив — маршрутная блокировка ({fail_streak}/{RESTART_AFTER_FAILS})"
+                    if fail_streak >= RESTART_AFTER_FAILS:
+                        # столько подряд — перезапускаем zapret
+                        res = restart_zapret_service()
+                        line += f" | autorestart -> {res}"
+                        fail_streak = 0
+                        notify("Zapret: перезапуск службы", f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд, перезапускаю zapret")
                     print(RED + "СБОЙ: " + line + RESET, flush=True)
                     LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
                     notify("Zapret: Discord недоступен", f"{ts}\nМаршрутная блокировка, продолжается")
         else:
+            fail_streak = 0
             print(GREEN + "OK: " + line + " | всё в порядке" + RESET, flush=True)
             LOG.open("a", encoding="utf-8").write("OK " + line + " | всё в порядке\n")
+        rotate_log()
         time.sleep(interval)
 
 

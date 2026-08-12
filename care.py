@@ -54,6 +54,38 @@ for h in range(18, 22):
 SLOTS["22:00"] = list(_NIGHT)
 
 SENT = Path(r"C:\запрет\care_sent.txt")
+REPORTS = Path(r"C:\запрет\reports.md")
+MAX_LOG_SIZE = 512 * 1024  # 512 КБ
+KEEP_LOGS = 3
+
+
+def rotate(path: Path, max_size=MAX_LOG_SIZE, keep=KEEP_LOGS):
+    """Если лог разросся — сдвигает копии (.1, .2, ...) и начинает новый."""
+    if not path.exists() or path.stat().st_size < max_size:
+        return
+    for i in range(keep - 1, 0, -1):
+        src = path.with_name(f"{path.name}.{i}")
+        dst = path.with_name(f"{path.name}.{i + 1}")
+        if src.exists():
+            dst.write_bytes(src.read_bytes())
+            src.unlink()
+    path.with_name(f"{path.name}.1").write_bytes(path.read_bytes())
+    path.write_text("", encoding="utf-8")
+
+
+def morning_report(day):
+    """Утренний отчёт в дневник: сколько слотов вчера отправлено будильником."""
+    rotate(SENT)
+    if not SENT.exists():
+        return
+    yesterday = SENT.read_text(encoding="utf-8").splitlines()
+    sent = sum(1 for ln in yesterday if ln.startswith(day))
+    text = f"- 🔔 Будильник: {sent} слотов отправлено ({day}).\n"
+    try:
+        with REPORTS.open("a", encoding="utf-8") as f:
+            f.write("\n" + text)
+    except Exception:
+        pass
 
 
 def notify(title, text):
@@ -88,12 +120,36 @@ def mark_sent(day, slot):
         f.write(f"{day} {slot}\n")
 
 
+def morning_report(day):
+    """Утренний отчёт в дневник: сколько слотов вчера отправлено будильником."""
+    rotate(SENT)
+    if not SENT.exists():
+        return
+    lines = SENT.read_text(encoding="utf-8").splitlines()
+    sent = sum(1 for ln in lines if ln.startswith(day))
+    text = f"- 🔔 Будильник: за вчера ({day}) отправлено слотов: {sent}.\n"
+    try:
+        with REPORTS.open("a", encoding="utf-8") as f:
+            f.write(text)
+    except Exception:
+        pass
+
+
 def main():
     print("Заботливый будильник запущен. Слоты:", ", ".join(SLOTS.keys()))
+    last_day = None
     while True:
         now = datetime.now()
         key = now.strftime("%H:%M")
         day = now.strftime("%Y-%m-%d")
+        # Раз в день (утром, до слотов) пишем отчёт о вчерашнем дне
+        if day != last_day:
+            last_day = day
+            if now.hour >= 9:
+                from datetime import timedelta
+                yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                morning_report(yesterday)
+                print(f"{now:%H:%M:%S} утренний отчёт за {yesterday} записан", flush=True)
         if key in SLOTS and not already_sent(day, key):
             try:
                 phrases = SLOTS[key]

@@ -96,7 +96,7 @@ python main.py
 ### Свои сайты (списки)
 Хотите обходить ещё какой-то сайт — добавьте его домен (по одному на строку) в файл:
 
-- `lists\list-general-user.txt` — сюда пишите **свои** домены (уже добавлены `crushon.ai`, `www/api/cdn.crushon.ai`);
+- `lists\list-general-user.txt` — сюда пишите **свои** домены (уже добавлены `crushon.ai`, `www/api/cdn.crushon.ai`, `pulsesync.dev`, `www.pulsesync.dev`);
 - `lists\ipset-all.txt` — сюда можно добавить IP-адреса в формате CIDR (например `8.6.112.0/32`).
 
 После правки **перезапустите** стратегию — списки перечитываются при каждом запуске.
