@@ -137,6 +137,24 @@ def winws_alive():
         return "?"
 
 
+def self_test():
+    """Стартовый self-test: проверяем, что Discord реально доступен через обход.
+
+    Не блокирует запуск — просто сообщает статус. Если обход не поднялся,
+    монитор всё равно продолжает наблюдение и сам поднимет службу при сбое.
+    """
+    code = http("https://discord.com/", timeout=15)
+    det, det_src = check_detector()
+    if code == "200":
+        msg = f"Self-test: Discord доступен через обход ✅ (discord.com -> 200, detector -> {det})"
+        print(GREEN + msg + RESET, flush=True)
+    else:
+        msg = (f"Self-test: Discord НЕ доступен при старте (discord.com -> {code}, "
+               f"detector -> {det}) — монитор продолжает наблюдение")
+        print(YELLOW + msg + RESET, flush=True)
+    LOG.open("a", encoding="utf-8").write("SELF-TEST " + msg + "\n")
+
+
 def rotate_log():
     """Если лог разросся — сдвигает копии (.1, .2, ...) и начинает новый."""
     if not LOG.exists() or LOG.stat().st_size < MAX_LOG_SIZE:
@@ -184,16 +202,22 @@ def restart_zapret():
 
 
 def restore_discord():
-    """Перезапускает zapret по кругу, пока discord.com не вернётся к 200."""
+    """Перезапускает службу zapret по кругу, пока discord.com не вернётся к 200.
+
+    ВАЖНО: перезапускаем именно СЛУЖБУ (restart_zapret_service), а не автономный
+    winws через restart_zapret.bat — иначе связь со службой теряется и при
+    перезагрузке ПК обход не поднимется.
+    """
     for attempt in range(1, 6):
-        restart_zapret()
+        res = restart_zapret_service()
         time.sleep(7)
         if http("https://discord.com/") == "200":
-            return f"OK (попытка {attempt})"
-    return "FAIL после 5 перезапусков"
+            return f"OK (попытка {attempt}, {res})"
+    return "FAIL после 5 перезапусков службы"
 
 
 def main():
+    self_test()
     interval = int(sys.argv[1]) * 60 if len(sys.argv) > 1 else 120
     print(f"Мониторинг Discord, интервал {interval // 60} мин. Лог: {LOG}")
     was_down = False
@@ -237,14 +261,21 @@ def main():
                     fail_streak += 1
                     line += f" | winws жив — маршрутная блокировка ({fail_streak}/{RESTART_AFTER_FAILS})"
                     if fail_streak >= RESTART_AFTER_FAILS:
-                        # столько подряд — перезапускаем zapret
-                        res = restart_zapret_service()
-                        line += f" | autorestart -> {res}"
-                        fail_streak = 0
-                        print(RED + "СБОЙ: " + line + RESET, flush=True)
-                        LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
-                        notify("Zapret: перезапуск службы",
-                               f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд, перезапускаю zapret")
+                        if disc_gone:
+                            # подтверждённый глобальный сбой Discord — перезапуск не поможет
+                            line += " | глобальный сбой Discord (status.discord.com) — перезапуск пропущен"
+                            fail_streak = 0
+                            print(YELLOW + "INFO: " + line + RESET, flush=True)
+                            LOG.open("a", encoding="utf-8").write("INFO " + line + "\n")
+                        else:
+                            # столько подряд — перезапускаем службу zapret
+                            res = restart_zapret_service()
+                            line += f" | autorestart -> {res}"
+                            fail_streak = 0
+                            print(RED + "СБОЙ: " + line + RESET, flush=True)
+                            LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
+                            notify("Zapret: перезапуск службы",
+                                   f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд, перезапускаю zapret")
                     else:
                         # пока не набралось 3 подряд — это INFO, не тревога
                         print(YELLOW + "INFO: " + line + RESET, flush=True)

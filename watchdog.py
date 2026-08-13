@@ -37,6 +37,39 @@ WATCHED = [
 
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 
+# Singleton: не даём запуститься второму экземпляру watchdog
+# (чтобы при запуске через Планировщик заданий не задублировались care/monitor).
+LOCK_FILE = Path(os.environ.get("TEMP", str(BASE_DIR))) / "zapretik_watchdog.lock"
+
+
+def acquire_lock():
+    """Возвращает True, если мы — единственный запущенный watchdog."""
+    try:
+        if LOCK_FILE.exists():
+            pid = LOCK_FILE.read_text(encoding="utf-8").strip()
+            if pid.isdigit():
+                r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                   capture_output=True, text=True,
+                                   timeout=10, creationflags=NO_WINDOW)
+                if str(pid) in r.stdout:
+                    return False  # старый экземпляр ещё жив
+    except Exception:
+        pass
+    try:
+        LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    except Exception:
+        pass
+    return True
+
+
+def release_lock():
+    try:
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+    except Exception:
+        pass
+
+
 
 def is_admin():
     try:
@@ -157,6 +190,16 @@ def check_winws_hash():
 
 
 def main():
+    if not acquire_lock():
+        print("Watchdog уже запущен (lock-файл занят) — выход.", flush=True)
+        sys.exit(0)
+    try:
+        _run()
+    finally:
+        release_lock()
+
+
+def _run():
     rotate(WATCHDOG_LOG)
     log("Watchdog запущен. Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     check_winws_hash()
