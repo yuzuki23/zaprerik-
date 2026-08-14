@@ -157,9 +157,28 @@ def winws_up():
         return True  # не можем проверить — не трогаем
 
 
-def start_zapret():
-    """Пытается поднять службу zapret (winws)."""
+def service_exists():
+    """True, если служба zapret зарегистрирована в системе."""
     try:
+        r = subprocess.run(["sc", "query", "zapret"], capture_output=True, text=True,
+                           timeout=15, creationflags=NO_WINDOW)
+        # returncode 0 + строка STATE => служба есть; 1060 => отсутствует
+        return r.returncode == 0 and "STATE" in r.stdout
+    except Exception:
+        return True  # не удалось проверить — считаем, что служба есть (не трогаем)
+
+
+def start_zapret():
+    """Поднимает службу zapret (winws). Если служба отсутствует — пересоздаёт её."""
+    try:
+        if not service_exists():
+            log("Служба zapret отсутствует — пересоздаю через reinstall_service.py")
+            try:
+                subprocess.run([str(PYTHON), str(BASE_DIR / "reinstall_service.py")],
+                               capture_output=True, text=True, timeout=120,
+                               creationflags=NO_WINDOW)
+            except Exception as e:
+                log(f"ОШИБКА пересоздания службы: {e}")
         if is_admin():
             r = subprocess.run(["sc", "start", "zapret"], capture_output=True, text=True,
                                timeout=30, creationflags=NO_WINDOW)
