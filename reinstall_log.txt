@@ -1,0 +1,21 @@
+Reinstalling zapret service from general.bat... 
+BINPATH length: 3017
+"C:\запрет\bin\winws.exe" --wf-tcp=80,443,2053,2083,2087,2096,8443,12 --wf-udp=443,19294-19344,50000-50100,12  --filter-udp=443 --hostlist="C:\запрет\lists\list-general.txt" --hostlist="C:\запрет\list ...
+taskkill winws -> ok
+>> sc.exe stop zapret -> 1060 [SC] OpenService FAILED 1060:
+
+The specified service does not exist as an installed service. 
+>> sc.exe delete zapret -> 1060 [SC] OpenService FAILED 1060:
+
+The specified service does not exist as an installed service. 
+CREATE -> 0 [SC] CreateService SUCCESS 
+START -> 0 SERVICE_NAME: zapret 
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0 
+ 
+--- zapret service state --- 
+        STATE              : 4  RUNNING 

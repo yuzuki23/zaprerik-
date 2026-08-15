@@ -28,6 +28,10 @@ HASH_FILE = BASE_DIR / "winws.sha256"
 MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 МБ
 KEEP_LOGS = 3
 
+# Самоперезапуск сторожа при изменении его собственного кода.
+WATCHDOG_SELF = BASE_DIR / "watchdog.py"
+WATCHDOG_SELF_MTIME = WATCHDOG_SELF.stat().st_mtime
+
 # Процессы под надзором: имя -> (скрипт, аргументы, частота перезапуска при сбое)
 # monitor.py без аргументов = интервал 120 секунд (по умолчанию)
 WATCHED = [
@@ -43,23 +47,31 @@ LOCK_FILE = Path(os.environ.get("TEMP", str(BASE_DIR))) / "zapretik_watchdog.loc
 
 
 def acquire_lock():
-    """Возвращает True, если мы — единственный запущенный watchdog."""
-    try:
-        if LOCK_FILE.exists():
-            pid = LOCK_FILE.read_text(encoding="utf-8").strip()
-            if pid.isdigit():
-                r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
-                                   capture_output=True, text=True,
-                                   timeout=10, creationflags=NO_WINDOW)
-                if str(pid) in r.stdout:
-                    return False  # старый экземпляр ещё жив
-    except Exception:
-        pass
-    try:
-        LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
-    except Exception:
-        pass
-    return True
+    """Возвращает True, если мы — единственный запущенный watchdog.
+
+    При запуске с env ZAPRETIK_REPLACING=1 (самоперезапуск) дожидается выхода
+    старого экземпляра, чтобы аккуратно передать управление без дублей.
+    """
+    replacing = os.environ.get("ZAPRETIK_REPLACING") == "1"
+    attempts = 40 if replacing else 1
+    for _ in range(attempts):
+        try:
+            if LOCK_FILE.exists():
+                pid = LOCK_FILE.read_text(encoding="utf-8").strip()
+                if pid.isdigit():
+                    r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                       capture_output=True, text=True, timeout=10,
+                                       creationflags=NO_WINDOW)
+                    if str(pid) in r.stdout:
+                        if replacing:
+                            time.sleep(0.5)
+                            continue
+                        return False  # старый экземпляр ещё жив
+            LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
+            return True
+        except Exception:
+            return True
+    return False
 
 
 def release_lock():
@@ -193,6 +205,57 @@ def start_zapret():
         log(f"ОШИБКА поднятия winws: {exc}")
 
 
+# Ежедневный перезапуск сторожа в заданный час, чтобы правки кода
+# (watchdog.py / monitor.py / care.py) подхватывались без ручного .bat.
+# Службу zapret не трогаем — Discord не дёргаем понапрасну.
+DAILY_RESTART_HOUR = 4
+daily_restart_done_day = None
+planned_restart = set()
+
+
+def self_restart():
+    """Перезапускает сам сторож с новым кодом.
+
+    Останавливаем подопечных, запускаем свежий python watchdog.py (с флагом
+    замены ZAPRETIK_REPLACING) и выходим — новый экземпляр берёт lock и
+    поднимает все скрипты уже с обновлённым кодом.
+    """
+    log("Самоперезапуск сторожа — подхват нового кода")
+    for entry in WATCHED:
+        proc = entry.get("proc")
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    try:
+        subprocess.Popen(
+            [str(PYTHON), str(WATCHDOG_SELF)],
+            cwd=str(BASE_DIR),
+            creationflags=NO_WINDOW,
+            env={**os.environ, "ZAPRETIK_REPLACING": "1"},
+        )
+    except Exception as exc:
+        log(f"ОШИБКА самоперезапуска сторожа: {exc}")
+    release_lock()
+    sys.exit(0)
+
+
+def maybe_daily_restart(entries):
+    """Раз в сутки (в DAILY_RESTART_HOUR) полностью перезапускает сторожа.
+
+    Новый экземпляр сам поднимет care/monitor уже с обновлённым кодом.
+    Запуск службы zapret не затрагивается.
+    """
+    global daily_restart_done_day
+    now = datetime.now()
+    day = now.strftime("%Y-%m-%d")
+    if now.hour == DAILY_RESTART_HOUR and daily_restart_done_day != day:
+        daily_restart_done_day = day
+        log("Ежедневный перезапуск сторожа в %02d:00 (подхват обновлений кода)" % DAILY_RESTART_HOUR)
+        self_restart()
+
+
 def check_winws_hash():
     """Сверяет SHA256 winws.exe с первым запуском. Если изменился — предупреждает."""
     if not WINWS.exists():
@@ -218,9 +281,46 @@ def main():
         release_lock()
 
 
+def kill_stray_scripts():
+    """Снимаем осиротевшие копии наших скриптов (care/monitor/watchdog),
+    чтобы при перезапусках не плодились дубли. Себя и своих детей не трогаем."""
+    ours = {os.getpid()}
+    for e in WATCHED:
+        p = e.get("proc")
+        if p is not None:
+            ours.add(p.pid)
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | "
+             "ForEach-Object { ($_.ProcessId.ToString() + '|' + $_.CommandLine) }"],
+            capture_output=True, text=True, timeout=25, creationflags=NO_WINDOW)
+        out = r.stdout
+    except Exception:
+        return
+    for line in out.splitlines():
+        if "|" not in line:
+            continue
+        pid_s, cmd = line.split("|", 1)
+        if not pid_s.strip().isdigit():
+            continue
+        pid = int(pid_s.strip())
+        if pid in ours:
+            continue
+        if any(s in cmd for s in ("care.py", "monitor.py", "watchdog.py")):
+            try:
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                               capture_output=True, text=True, timeout=10,
+                               creationflags=NO_WINDOW)
+                log(f"Снят осиротевший процесс {pid} ({cmd[:70]})")
+            except Exception:
+                pass
+
+
 def _run():
     rotate(WATCHDOG_LOG)
     log("Watchdog запущен. Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    kill_stray_scripts()
     check_winws_hash()
     for entry in WATCHED:
         entry["proc"] = start_proc(entry)
@@ -228,12 +328,22 @@ def _run():
         time.sleep(1)
 
     while True:
+        # сам перезапуск, если изменился собственный код сторожа
+        try:
+            if WATCHDOG_SELF.stat().st_mtime != WATCHDOG_SELF_MTIME:
+                self_restart()
+        except Exception:
+            pass
+        maybe_daily_restart(WATCHED)
         for entry in WATCHED:
             proc = entry.get("proc")
             if proc is not None and proc.poll() is not None:
                 collect_output(entry)
                 code = proc.poll()
-                if entry.get("down_since") is None:
+                if entry["name"] in planned_restart:
+                    planned_restart.discard(entry["name"])
+                    log(f"Плановый перезапуск {entry['name']} (код {code})")
+                elif entry.get("down_since") is None:
                     entry["down_since"] = time.time()
                     log(f"ПАДЕНИЕ {entry['name']} (код {code}) — перезапускаю")
                 else:

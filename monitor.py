@@ -18,6 +18,14 @@ from pathlib import Path
 
 os.system("")  # включаем ANSI-цвета в Windows-терминале
 
+# Под pythonw stdout — это не консоль, а cp1251-пайп: эмодзи (✅ и т.п.) крашат
+# print() с UnicodeEncodeError. Переводим вывод в utf-8 с безопасной заменой.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 GREEN = "\033[32m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
@@ -25,7 +33,9 @@ RESET = "\033[0m"
 
 LOG = Path(r"C:\запрет\discord_monitor.log")
 STATUS = Path(r"C:\запрет\discord_status.txt")
-HEALTH_URLS = ["https://discord.com/", "https://gateway.discord.gg/"]
+DISCORD_URL = "https://discord.com/"
+GATEWAY_URL = "https://gateway.discord.gg/"
+HEALTH_URLS = [DISCORD_URL, GATEWAY_URL]
 # Несколько детекторов: если основной (detector404.ru) ляжет — пробуем запасной.
 DETECTORS = ["https://detector404.ru/discord", "https://www.gstatic.com/generate_204"]
 
@@ -60,10 +70,16 @@ def notify(title, text):
 
 def write_status(ts, codes, detector, detector_src, extra=""):
     """Живой статус-файл: показывает текущее состояние Discord."""
-    discord = codes.get("https://discord.com/", "?")
-    if discord == "200":
+    discord = codes.get(DISCORD_URL, "?")
+    gateway = codes.get(GATEWAY_URL, "?")
+    # 404 на шлюзе — это НОРМА (websocket-эндпоинт отвечает 404 на обычный GET).
+    # Настоящий сбой шлюза — код 000 (соединение сброшено) или иная ошибка.
+    gw_ok = gateway in ("200", "404")
+    if discord == "200" and gw_ok:
         verdict = "ВСЁ РАБОТАЕТ"
-    elif codes.get("https://gateway.discord.gg/", "?") == "200":
+    elif discord == "200" and not gw_ok:
+        verdict = "ЧАСТИЧНЫЙ СБОЙ (шлюз Discord недоступен — клиент не грузится)"
+    elif discord != "200" and gw_ok:
         verdict = "ЧАСТИЧНЫЙ СБОЙ (часть сервисов лежит)"
     else:
         verdict = "ЛЕЖИТ / НЕ ДОСТУПЕН"
@@ -71,8 +87,8 @@ def write_status(ts, codes, detector, detector_src, extra=""):
     lines = [
         f"Discord — живой статус (обновлено: {ts})",
         "==========================================",
-        f"discord.com          -> {codes.get('https://discord.com/', '?'):>3}",
-        f"gateway.discord.gg   -> {codes.get('https://gateway.discord.gg/', '?'):>3}",
+        f"discord.com          -> {discord:>3}",
+        f"gateway.discord.gg   -> {gateway:>3}",
         f"{det_label:<22} -> {detector:>3}",
         "==========================================",
         "ВЕРДИКТ: " + verdict,
@@ -248,18 +264,31 @@ def main():
                 LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
                 notify("Zapret: сбой Discord (winws)", f"{ts}\n{restore}")
             else:
-                # winws жив — повторная проверка, чтобы отсеять разовые обрывы маршрута
+                # winws жив — повторная проверка ОБОИХ эндпоинтов, чтобы отсеять
+                # разовые обрывы маршрута. Раньше проверяли только discord.com, из-за
+                # чего падение шлюза (gateway.discord.gg -> 000) маскировалось под
+                # «разовый обрыв», winws не перезапускался, а клиент Discord не грузился.
                 time.sleep(5)
-                if http("https://discord.com/") == "200":
+                d2 = http(DISCORD_URL)
+                g2 = http(GATEWAY_URL)
+                disc_ok = (d2 == "200")
+                gw_ok = (g2 in ("200", "404"))
+                if disc_ok and gw_ok:
                     # сам восстановился — это НЕ сбой, обычная OK-строка
                     fail_streak = 0
                     print(GREEN + "OK: " + line + " (разовый обрыв, сам ожил)" + RESET, flush=True)
                     LOG.open("a", encoding="utf-8").write(
                         "OK " + line + " (разовый обрыв маршрута, сам восстановился)\n")
                 else:
-                    # держится недоступным дольше — реальная маршрутная блокировка
+                    # что-то держится недоступным дольше — реальная маршрутная блокировка
+                    failed = []
+                    if not disc_ok:
+                        failed.append("discord.com")
+                    if not gw_ok:
+                        failed.append("gateway.discord.gg")
                     fail_streak += 1
-                    line += f" | winws жив — маршрутная блокировка ({fail_streak}/{RESTART_AFTER_FAILS})"
+                    line += (f" | winws жив — маршрутная блокировка "
+                             f"({fail_streak}/{RESTART_AFTER_FAILS}): " + ", ".join(failed))
                     if fail_streak >= RESTART_AFTER_FAILS:
                         if disc_gone:
                             # подтверждённый глобальный сбой Discord — перезапуск не поможет
@@ -268,20 +297,21 @@ def main():
                             print(YELLOW + "INFO: " + line + RESET, flush=True)
                             LOG.open("a", encoding="utf-8").write("INFO " + line + "\n")
                         else:
-                            # столько подряд — перезапускаем службу zapret
+                            # столько подряд — перезапускаем службу zapret (winws),
+                            # чтобы сбросить DPI-состояние и поднять шлюз Discord
                             res = restart_zapret_service()
                             line += f" | autorestart -> {res}"
                             fail_streak = 0
                             print(RED + "СБОЙ: " + line + RESET, flush=True)
                             LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
                             notify("Zapret: перезапуск службы",
-                                   f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд, перезапускаю zapret")
+                                   f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд (в т.ч. шлюз), перезапускаю zapret")
                     else:
                         # пока не набралось 3 подряд — это INFO, не тревога
                         print(YELLOW + "INFO: " + line + RESET, flush=True)
                         LOG.open("a", encoding="utf-8").write("INFO " + line + "\n")
                         notify("Zapret: Discord недоступен",
-                               f"{ts}\nМаршрутная блокировка, продолжается")
+                               f"{ts}\nМаршрутная блокировка ({', '.join(failed)}), продолжается")
         else:
             fail_streak = 0
             print(GREEN + "OK: " + line + " | всё в порядке" + RESET, flush=True)

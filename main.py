@@ -99,7 +99,7 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/2.0.1 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/2.0.2 (Windows wrapper for bol-van/zapret)"
 
 # Маркеры ошибок, по которым строки вывода winws.exe красятся в красный цвет.
 ERROR_MARKERS: Tuple[str, ...] = (
