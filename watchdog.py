@@ -41,6 +41,12 @@ WATCHED = [
 
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 
+# Heartbeat-живость моника: если процесс жив, но не пишет в лог/статус дольше
+# LIVENESS_TIMEOUT секунд — считаем его зависшим и принудительно перезапускаем.
+# Иначе сторож не видит Hang (видит только падение, через proc.poll()).
+MONITOR_LOG = BASE_DIR / "discord_monitor.log"
+LIVENESS_TIMEOUT = 360  # 6 минут
+
 # Singleton: не даём запуститься второму экземпляру watchdog
 # (чтобы при запуске через Планировщик заданий не задублировались care/monitor).
 LOCK_FILE = Path(os.environ.get("TEMP", str(BASE_DIR))) / "zapretik_watchdog.lock"
@@ -178,6 +184,20 @@ def service_exists():
         return r.returncode == 0 and "STATE" in r.stdout
     except Exception:
         return True  # не удалось проверить — считаем, что служба есть (не трогаем)
+
+
+def monitor_last_activity():
+    """Время последней записи моника (лог или файл статуса). None, если файлов нет."""
+    best = None
+    for p in (MONITOR_LOG, BASE_DIR / "discord_status.txt"):
+        try:
+            if p.exists():
+                m = p.stat().st_mtime
+                if best is None or m > best:
+                    best = m
+        except Exception:
+            pass
+    return best
 
 
 def start_zapret():
@@ -353,6 +373,19 @@ def _run():
             if proc is not None and entry.get("down_since") is not None:
                 log(f"{entry['name']} снова работает (PID={proc.pid})")
                 entry["down_since"] = None
+
+            # Heartbeat-живость моника: процесс жив, но не пишет в лог > LIVENESS_TIMEOUT.
+            # Зависший (молчащий) моник сторож иначе не лечит — он видит только падение.
+            if entry["name"] == "monitor" and proc is not None and proc.poll() is None:
+                last = monitor_last_activity()
+                if last is not None:
+                    idle = time.time() - last
+                    if idle > LIVENESS_TIMEOUT:
+                        log(f"МОНИК ЗАВИС (молчит {int(idle // 60)} мин при живом процессе) — принудительный перезапуск")
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
 
         # Надзор за winws
         if not winws_up():
