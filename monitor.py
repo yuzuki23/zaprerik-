@@ -45,6 +45,11 @@ MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 МБ
 KEEP_LOGS = 3
 RESTART_AFTER_FAILS = 3  # после стольких «настоящих» сбоев подряд — перезапускаем zapret
 
+# Быстрые перепроверки при первом подозрении на сбой — чтобы транзитные
+# микро-блики (шлюз/маршрут на пару секунд) не попадали в статус как «ЧАСТИЧНЫЙ СБОЙ».
+RETRY_ATTEMPTS = 3   # сколько раз переспросить, прежде чем считать сбой настоящим
+RETRY_DELAY = 3      # секунды между перепроверками
+
 
 def notify(title, text):
     """Системное уведомление Windows при сбое."""
@@ -78,9 +83,9 @@ def write_status(ts, codes, detector, detector_src, extra=""):
     if discord == "200" and gw_ok:
         verdict = "ВСЁ РАБОТАЕТ"
     elif discord == "200" and not gw_ok:
-        verdict = "ЧАСТИЧНЫЙ СБОЙ (шлюз Discord недоступен — клиент не грузится)"
+        verdict = "ЧАСТИЧНЫЙ СБОЙ (шлюз gateway.discord.gg недоступен)"
     elif discord != "200" and gw_ok:
-        verdict = "ЧАСТИЧНЫЙ СБОЙ (часть сервисов лежит)"
+        verdict = "ЧАСТИЧНЫЙ СБОЙ (сайт discord.com недоступен)"
     else:
         verdict = "ЛЕЖИТ / НЕ ДОСТУПЕН"
     det_label = "detector404.ru/discord" if "detector404" in detector_src else detector_src
@@ -141,6 +146,23 @@ def check_detector():
         if code in ("200", "204"):
             return code, url
     return "ERR", DETECTORS[0]
+
+
+def retry_resolve(discord_url, gateway_url):
+    """Серия быстрых перепроверок, чтобы отсечь транзитные микро-блики.
+
+    Возвращает (recovered, last_discord_code, last_gateway_code):
+      - recovered=True  — на одной из перепроверок оба эндпоинта вернулись в норму;
+      - recovered=False — блик не отпускает, возвращаются коды последней перепроверки.
+    """
+    last_d, last_g = "?", "?"
+    for _ in range(RETRY_ATTEMPTS):
+        time.sleep(RETRY_DELAY)
+        last_d = http(discord_url)
+        last_g = http(gateway_url)
+        if last_d == "200" and last_g in ("200", "404"):
+            return True, last_d, last_g
+    return False, last_d, last_g
 
 
 def winws_alive():
@@ -246,76 +268,85 @@ def main():
         api, indicator = status_api()  # официальный статус Discord (status.discord.com)
         disc_gone = api in ("major_outage", "partial_outage") or indicator in ("major", "minor", "critical")
         extra = f"discordstatus.com: API={api}, indicator={indicator}"
-        write_status(ts, codes, detector, detector_src, extra)  # живой статус-файл
-        if was_down and not disc_gone:
-            # официальный статус восстановился — радостное уведомление
-            notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
-        was_down = disc_gone
         line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
                 + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator}")
-        if not ok:
+
+        if ok:
+            # всё в порядке — пишем статус и сбрасываем счётчик сбоев
+            fail_streak = 0
+            write_status(ts, codes, detector, detector_src, extra)  # живой статус-файл
+            if was_down and not disc_gone:
+                # официальный статус восстановился — радостное уведомление
+                notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
+            was_down = disc_gone
+            print(GREEN + "OK: " + line + " | всё в порядке" + RESET, flush=True)
+            LOG.open("a", encoding="utf-8").write("OK " + line + " | всё в порядке\n")
+        else:
+            # первичный признак сбоя. НЕ пишем «ЧАСТИЧНЫЙ СБОЙ» сразу — сначала
+            # быстрые перепроверки, чтобы транзитный микро-блип не попал в статус.
             alive = winws_alive()
             if alive == "no" or alive == "?":
-                # winws умер — перезапуск и проверка восстановления
+                # winws мёртв/неизвестен — сразу перезапуск и проверка восстановления
                 fail_streak = 0
                 restore = restore_discord()
-                line += f" | winws -> {alive} | autorestart -> {restore}"
-                print(RED + "СБОЙ: " + line + RESET, flush=True)
-                LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
+                codes = {u: http(u) for u in HEALTH_URLS}
+                write_status(ts, codes, detector, detector_src, extra)
+                line2 = line + f" | winws -> {alive} | autorestart -> {restore}"
+                print(RED + "СБОЙ: " + line2 + RESET, flush=True)
+                LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
                 notify("Zapret: сбой Discord (winws)", f"{ts}\n{restore}")
+                was_down = disc_gone
             else:
-                # winws жив — повторная проверка ОБОИХ эндпоинтов, чтобы отсеять
-                # разовые обрывы маршрута. Раньше проверяли только discord.com, из-за
-                # чего падение шлюза (gateway.discord.gg -> 000) маскировалось под
-                # «разовый обрыв», winws не перезапускался, а клиент Discord не грузился.
-                time.sleep(5)
-                d2 = http(DISCORD_URL)
-                g2 = http(GATEWAY_URL)
-                disc_ok = (d2 == "200")
-                gw_ok = (g2 in ("200", "404"))
-                if disc_ok and gw_ok:
-                    # сам восстановился — это НЕ сбой, обычная OK-строка
+                # winws жив — серия быстрых перепроверок (retry), чтобы отсечь
+                # разовые обрывы маршрута. Если на перепроверке всё вернулось в норму,
+                # это НЕ сбой — тихо пишем «ВСЁ РАБОТАЕТ» (микро-блип отпущен).
+                recovered, d2, g2 = retry_resolve(DISCORD_URL, GATEWAY_URL)
+                if recovered:
                     fail_streak = 0
-                    print(GREEN + "OK: " + line + " (разовый обрыв, сам ожил)" + RESET, flush=True)
+                    codes = {DISCORD_URL: d2, GATEWAY_URL: g2}
+                    write_status(ts, codes, detector, detector_src,
+                                 extra + " | микро-блип отпущен на перепроверке — работает")
+                    if was_down and not disc_gone:
+                        notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
+                    was_down = disc_gone
+                    print(GREEN + "OK: " + line + " (микро-блип, сам ожил на перепроверке)" + RESET, flush=True)
                     LOG.open("a", encoding="utf-8").write(
-                        "OK " + line + " (разовый обрыв маршрута, сам восстановился)\n")
+                        "OK " + line + " (микро-блип маршрута, сам восстановился на перепроверке)\n")
                 else:
-                    # что-то держится недоступным дольше — реальная маршрутная блокировка
+                    # подтверждённая маршрутная блокировка (перепроверки не помогли)
+                    write_status(ts, codes, detector, detector_src, extra)
                     failed = []
-                    if not disc_ok:
+                    if codes[DISCORD_URL] != "200":
                         failed.append("discord.com")
-                    if not gw_ok:
+                    if codes[GATEWAY_URL] not in ("200", "404"):
                         failed.append("gateway.discord.gg")
                     fail_streak += 1
-                    line += (f" | winws жив — маршрутная блокировка "
-                             f"({fail_streak}/{RESTART_AFTER_FAILS}): " + ", ".join(failed))
+                    line2 = line + (f" | winws жив — маршрутная блокировка "
+                                    f"({fail_streak}/{RESTART_AFTER_FAILS}): " + ", ".join(failed))
                     if fail_streak >= RESTART_AFTER_FAILS:
                         if disc_gone:
                             # подтверждённый глобальный сбой Discord — перезапуск не поможет
-                            line += " | глобальный сбой Discord (status.discord.com) — перезапуск пропущен"
+                            line2 += " | глобальный сбой Discord (status.discord.com) — перезапуск пропущен"
                             fail_streak = 0
-                            print(YELLOW + "INFO: " + line + RESET, flush=True)
-                            LOG.open("a", encoding="utf-8").write("INFO " + line + "\n")
+                            print(YELLOW + "INFO: " + line2 + RESET, flush=True)
+                            LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
                         else:
                             # столько подряд — перезапускаем службу zapret (winws),
                             # чтобы сбросить DPI-состояние и поднять шлюз Discord
                             res = restart_zapret_service()
-                            line += f" | autorestart -> {res}"
+                            line2 += f" | autorestart -> {res}"
                             fail_streak = 0
-                            print(RED + "СБОЙ: " + line + RESET, flush=True)
-                            LOG.open("a", encoding="utf-8").write("СБОЙ " + line + "\n")
+                            print(RED + "СБОЙ: " + line2 + RESET, flush=True)
+                            LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
                             notify("Zapret: перезапуск службы",
                                    f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд (в т.ч. шлюз), перезапускаю zapret")
                     else:
                         # пока не набралось 3 подряд — это INFO, не тревога
-                        print(YELLOW + "INFO: " + line + RESET, flush=True)
-                        LOG.open("a", encoding="utf-8").write("INFO " + line + "\n")
+                        print(YELLOW + "INFO: " + line2 + RESET, flush=True)
+                        LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
                         notify("Zapret: Discord недоступен",
-                               f"{ts}\nМаршрутная блокировка ({', '.join(failed)}), продолжается")
-        else:
-            fail_streak = 0
-            print(GREEN + "OK: " + line + " | всё в порядке" + RESET, flush=True)
-            LOG.open("a", encoding="utf-8").write("OK " + line + " | всё в порядке\n")
+                                f"{ts}\nМаршрутная блокировка ({', '.join(failed)}), продолжается")
+                    was_down = disc_gone
         rotate_log()
         time.sleep(interval)
 
