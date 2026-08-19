@@ -35,6 +35,11 @@ discordactivities.com
 discordapp.com
 discordapp.net
 discordcdn.com
+cdn.discordapp.com
+media.discordapp.net
+images-ext-1.discordapp.net
+images-ext-2.discordapp.net
+emoji.discordapp.com
 discordmerch.com
 discordpartygames.com
 discordsays.com

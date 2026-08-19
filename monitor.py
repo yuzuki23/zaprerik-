@@ -35,6 +35,7 @@ LOG = Path(r"C:\запрет\discord_monitor.log")
 STATUS = Path(r"C:\запрет\discord_status.txt")
 DISCORD_URL = "https://discord.com/"
 GATEWAY_URL = "https://gateway.discord.gg/"
+CDN_URL = "https://cdn.discordapp.com/"
 HEALTH_URLS = [DISCORD_URL, GATEWAY_URL]
 # Несколько детекторов: если основной (detector404.ru) ляжет — пробуем запасной.
 DETECTORS = ["https://detector404.ru/discord", "https://www.gstatic.com/generate_204"]
@@ -266,8 +267,9 @@ def main():
         detector, detector_src = check_detector()
         ok = all(c == "200" or (c == "404" and "gateway" in u) for u, c in codes.items())
         api, indicator = status_api()  # официальный статус Discord (status.discord.com)
+        cdn = http(CDN_URL)  # Discord CDN (аватары/картинки)
         disc_gone = api in ("major_outage", "partial_outage") or indicator in ("major", "minor", "critical")
-        extra = f"discordstatus.com: API={api}, indicator={indicator}"
+        extra = f"discordstatus.com: API={api}, indicator={indicator} | cdn.discordapp.com -> {cdn}"
         line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
                 + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator}")
 
