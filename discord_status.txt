@@ -1,8 +1,8 @@
-Discord — живой статус (обновлено: 2026-08-19 19:00:44)
+Discord — живой статус (обновлено: 2026-08-21 00:57:13)
 ==========================================
 discord.com          -> 200
 gateway.discord.gg   -> 404
 detector404.ru/discord -> 200
 ==========================================
 ВЕРДИКТ: ВСЁ РАБОТАЕТ
-Доп.: discordstatus.com: API=operational, indicator=none | cdn.discordapp.com -> 403
+Доп.: discordstatus.com: API=?, indicator=? | cdn.discordapp.com -> 403 | микро-блип отпущен на перепроверке — работает
