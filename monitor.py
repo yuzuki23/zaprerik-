@@ -127,7 +127,7 @@ def status_api():
         indicator = data.get("status", {}).get("indicator", "unknown")
         return api, indicator
     except Exception:
-        return "?", "?"
+        return "n/a", "n/a"
 
 
 def http(url, timeout=12):
@@ -309,6 +309,10 @@ def main():
                 if recovered:
                     fail_streak = 0
                     codes = {DISCORD_URL: d2, GATEWAY_URL: g2}
+                    # Пересобираем строку из РЕАЛЬНЫХ (восстановленных) кодов,
+                    # чтобы в логе не висело противоречивое «OK … 000».
+                    line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
+                            + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator}")
                     write_status(ts, codes, detector, detector_src,
                                  extra + " | микро-блип отпущен на перепроверке — работает")
                     if was_down and not disc_gone:
@@ -336,6 +340,14 @@ def main():
                         # затык/особенность пробы, а не блок — обход не перезапускаем.
                         fail_streak = 0
                         line2 = line + " | discord.com недоступен при пробе, но detector404 доступен — транзитный блип, обход не трогаем"
+                        print(YELLOW + "INFO: " + line2 + RESET, flush=True)
+                        LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                    elif detector == "ERR":
+                        # ОБА детектора недоступны — не можем независимо подтвердить
+                        # блок Discord. Не дёргаем обход из-за отказа самих детекторов:
+                        # ждём ещё цикл, счётчик сбоев не накручиваем.
+                        fail_streak = 0
+                        line2 = line + " | оба детектора недоступны — блок не подтверждён, ждём ещё цикл (обход не трогаем)"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                         LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
                     else:
