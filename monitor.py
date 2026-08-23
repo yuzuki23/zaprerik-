@@ -33,6 +33,8 @@ RESET = "\033[0m"
 
 LOG = Path(r"C:\запрет\discord_monitor.log")
 STATUS = Path(r"C:\запрет\discord_status.txt")
+BASE_DIR = Path(r"C:\запрет")
+REINSTALL = BASE_DIR / "reinstall_service.py"
 DISCORD_URL = "https://discord.com/"
 GATEWAY_URL = "https://gateway.discord.gg/"
 CDN_URL = "https://cdn.discordapp.com/"
@@ -209,8 +211,33 @@ def rotate_log():
     LOG.write_text("", encoding="utf-8")
 
 
+def service_exists():
+    """True, если служба zapret зарегистрирована в системе (не удалена)."""
+    try:
+        r = subprocess.run(["sc", "query", "zapret"], capture_output=True, text=True,
+                           timeout=15, creationflags=NO_WINDOW)
+        return r.returncode == 0 and "STATE" in r.stdout
+    except Exception:
+        return True  # не удалось проверить — считаем, что служба есть (не трогаем)
+
+
 def restart_zapret_service():
-    """Перезапуск службы zapret (winws) через sc/net."""
+    """Перезапуск службы zapret (winws).
+
+    Если служба удалена (не просто остановлена) — сначала пересоздаём её через
+    reinstall_service.py. Запуск идёт без UAC, если монитор запущен с правами
+    админа (наследует elevation от сторожа ZapretikWatchdog).
+    """
+    created = ""
+    if not service_exists():
+        # служба отсутствует — скорее всего была удалена. Пересоздаём.
+        created = " | служба отсутствовала — вызвано пересоздание"
+        try:
+            subprocess.run([sys.executable, str(REINSTALL)],
+                           capture_output=True, text=True, timeout=120,
+                           creationflags=NO_WINDOW)
+        except Exception as exc:
+            return f"FAIL пересоздание: {exc}"
     try:
         subprocess.run(["net", "stop", "zapret"], capture_output=True, text=True, timeout=30,
                        creationflags=NO_WINDOW)
@@ -219,10 +246,10 @@ def restart_zapret_service():
     time.sleep(2)
     try:
         r = subprocess.run(["net", "start", "zapret"], capture_output=True, text=True, timeout=30,
-                           creationflags=NO_WINDOW)
-        return "OK" if r.returncode == 0 else f"FAIL {r.stdout.strip()[-100:]}"
+                            creationflags=NO_WINDOW)
+        return ("OK" + created) if r.returncode == 0 else f"FAIL {r.stdout.strip()[-100:]}" + created
     except Exception as exc:
-        return f"FAIL {exc}"
+        return f"FAIL {exc}" + created
 
 
 def restart_zapret():
@@ -290,13 +317,14 @@ def main():
             # первичный признак сбоя. НЕ пишем «ЧАСТИЧНЫЙ СБОЙ» сразу — сначала
             # быстрые перепроверки, чтобы транзитный микро-блип не попал в статус.
             alive = winws_alive()
+            svc = "есть" if service_exists() else "ОТСУТСТВУЕТ (удалена)"
             if alive == "no" or alive == "?":
                 # winws мёртв/неизвестен — сразу перезапуск и проверка восстановления
                 fail_streak = 0
                 restore = restore_discord()
                 codes = {u: http(u) for u in HEALTH_URLS}
                 write_status(ts, codes, detector, detector_src, extra)
-                line2 = line + f" | winws -> {alive} | autorestart -> {restore}"
+                line2 = line + f" | winws -> {alive} | service -> {svc} | autorestart -> {restore}"
                 print(RED + "СБОЙ: " + line2 + RESET, flush=True)
                 LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
                 notify("Zapret: сбой Discord (winws)", f"{ts}\n{restore}")
