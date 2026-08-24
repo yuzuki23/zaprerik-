@@ -59,7 +59,14 @@ RETRY_DELAY = 3      # секунды между перепроверками
 
 
 def notify(title, text):
-    """Системное уведомление Windows при сбое."""
+    """Системное уведомление Windows при сбое (безопасно — никогда не падает)."""
+    try:
+        _notify_impl(title, text)
+    except Exception:
+        pass
+
+
+def _notify_impl(title, text):
     ps1 = (
         "Add-Type -AssemblyName System.Windows.Forms\n"
         "Add-Type -AssemblyName System.Drawing\n"
@@ -232,6 +239,8 @@ def restart_zapret_service():
     if not service_exists():
         # служба отсутствует — скорее всего была удалена. Пересоздаём.
         created = " | служба отсутствовала — вызвано пересоздание"
+        notify("Zapret: служба zapret была удалена",
+               "Пересоздал и запускаю автоматически (без UAC)")
         try:
             subprocess.run([sys.executable, str(REINSTALL)],
                            capture_output=True, text=True, timeout=120,
