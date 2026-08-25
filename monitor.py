@@ -10,6 +10,7 @@
 """
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -45,6 +46,18 @@ CDN_URL = "https://cdn.discordapp.com/"
 HEALTH_URLS = [DISCORD_URL, GATEWAY_URL]
 # Несколько детекторов: если основной (detector404.ru) ляжет — пробуем запасной.
 DETECTORS = ["https://detector404.ru/discord", "https://www.gstatic.com/generate_204"]
+
+# Проверка голосового пути: реальный WebSocket-хендшейк до шлюза Discord.
+# DPI часто режет именно WebSocket (голос/видео), оставляя HTTPS живым — поэтому
+# штатный HTTPS-пинг этого не ловит. Хендшейк до wss://gateway.discord.gg и ожидание
+# ответа 101 = голосовой путь открыт и не заблокирован.
+VOICE_WS_HOST = "gateway.discord.gg"
+VOICE_WS_PORT = 443
+VOICE_WS_PATH = "/?v=4&encoding=json"
+
+# Защита от флапа: не перезапускаем службу чаще раза в это время (сек).
+RESTART_COOLDOWN = 10 * 60
+LAST_RESTART_TS = 0.0  # время последнего реального перезапуска (epoch)
 
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — консольные дети не открывают окно (важно для pythonw)
 
@@ -87,7 +100,7 @@ def _notify_impl(title, text):
                      creationflags=subprocess.CREATE_NO_WINDOW)
 
 
-def write_status(ts, codes, detector, detector_src, extra=""):
+def write_status(ts, codes, detector, detector_src, extra="", voice="?"):
     """Живой статус-файл: показывает текущее состояние Discord."""
     discord = codes.get(DISCORD_URL, "?")
     gateway = codes.get(GATEWAY_URL, "?")
@@ -105,6 +118,7 @@ def write_status(ts, codes, detector, detector_src, extra=""):
         "==========================================",
         f"discord.com          -> {discord:>3}",
         f"gateway.discord.gg   -> {gateway:>3}",
+        f"voice ws (голос)     -> {voice:>3}",
         f"{det_label:<22} -> {detector:>3}",
         "==========================================",
         "ВЕРДИКТ: " + verdict,
@@ -157,6 +171,49 @@ def check_detector():
         if code in ("200", "204"):
             return code, url
     return "ERR", DETECTORS[0]
+
+
+def check_voice_ws():
+    """Реальная проверка голосового пути: WebSocket-хендшейк до шлюза Discord.
+
+    DPI нередко режет именно WebSocket (голос/видео в Discord), оставляя обычный
+    HTTPS живым — поэтому штатный пинг discord.com этого не ловит. Делаем минимальный
+    WS-апгрейд до wss://gateway.discord.gg и ждём ответ 101 Switching Protocols.
+    Возвращает 'OK' (путь открыт) или 'ERR <причина>'.
+    """
+    try:
+        import base64 as _b64
+        import ssl as _ssl
+        raw = _b64.b64encode(os.urandom(16)).decode()
+        ctx = _ssl.create_default_context()
+        plain = socket.create_connection((VOICE_WS_HOST, VOICE_WS_PORT), timeout=8)
+        sock = ctx.wrap_socket(plain, server_hostname=VOICE_WS_HOST)
+        sock.settimeout(8)
+        req = (
+            f"GET {VOICE_WS_PATH} HTTP/1.1\r\n"
+            f"Host: {VOICE_WS_HOST}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {raw}\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        ).encode()
+        sock.sendall(req)
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            buf += chunk
+        sock.close()
+        if not buf:
+            return "ERR нет ответа"
+        status_line = buf.split(b"\r\n", 1)[0].decode(errors="replace")
+        if "101" in status_line:
+            return "OK"
+        return "ERR " + status_line
+    except Exception as exc:
+        return f"ERR {exc}"
 
 
 def retry_resolve(discord_url, gateway_url):
@@ -293,6 +350,7 @@ def restore_discord():
 
 
 def main():
+    global LAST_RESTART_TS
     self_test()
     interval = int(sys.argv[1]) * 60 if len(sys.argv) > 1 else 120
     print(f"Мониторинг Discord, интервал {interval // 60} мин. Лог: {LOG}")
@@ -307,15 +365,16 @@ def main():
         ok = (codes.get(DISCORD_URL) == "200") and (detector in ("200", "204"))
         api, indicator = status_api()  # официальный статус Discord (status.discord.com)
         cdn = http(CDN_URL)  # Discord CDN (аватары/картинки)
+        voice = check_voice_ws()  # реальная проверка голосового WebSocket-пути
         disc_gone = api in ("major_outage", "partial_outage") or indicator in ("major", "minor", "critical")
-        extra = f"discordstatus.com: API={api}, indicator={indicator} | cdn.discordapp.com -> {cdn}"
+        extra = f"discordstatus.com: API={api}, indicator={indicator} | cdn.discordapp.com -> {cdn} | voice_ws:{voice}"
         line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
-                + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator}")
+                + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator} | voice_ws -> {voice}")
 
         if ok:
             # всё в порядке — пишем статус и сбрасываем счётчик сбоев
             fail_streak = 0
-            write_status(ts, codes, detector, detector_src, extra)  # живой статус-файл
+            write_status(ts, codes, detector, detector_src, extra, voice)  # живой статус-файл
             if was_down and not disc_gone:
                 # официальный статус восстановился — радостное уведомление
                 notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
@@ -332,7 +391,7 @@ def main():
                 fail_streak = 0
                 restore = restore_discord()
                 codes = {u: http(u) for u in HEALTH_URLS}
-                write_status(ts, codes, detector, detector_src, extra)
+                write_status(ts, codes, detector, detector_src, extra, voice)
                 line2 = line + f" | winws -> {alive} | service -> {svc} | autorestart -> {restore}"
                 print(RED + "СБОЙ: " + line2 + RESET, flush=True)
                 LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
@@ -349,9 +408,9 @@ def main():
                     # Пересобираем строку из РЕАЛЬНЫХ (восстановленных) кодов,
                     # чтобы в логе не висело противоречивое «OK … 000».
                     line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
-                            + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator}")
+                            + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator} | voice_ws -> {voice}")
                     write_status(ts, codes, detector, detector_src,
-                                 extra + " | микро-блип отпущен на перепроверке — работает")
+                                 extra + " | микро-блип отпущен на перепроверке — работает", voice)
                     if was_down and not disc_gone:
                         notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
                     was_down = disc_gone
@@ -360,7 +419,7 @@ def main():
                         "OK " + line + " (микро-блип маршрута, сам восстановился на перепроверке)\n")
                 else:
                     # Перепроверки не помогли. Решаем: настоящий блок или мимолётный блип.
-                    write_status(ts, codes, detector, detector_src, extra)
+                    write_status(ts, codes, detector, detector_src, extra, voice)
                     disc_down = codes.get(DISCORD_URL) != "200"
                     det_ok = detector in ("200", "204")
 
@@ -403,15 +462,25 @@ def main():
                                 print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                                 LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
                             else:
-                                # столько подряд — перезапускаем службу zapret (winws),
-                                # чтобы сбросить DPI-состояние и поднять обход
-                                res = restart_zapret_service()
-                                line2 += f" | autorestart -> {res}"
-                                fail_streak = 0
-                                print(RED + "СБОЙ: " + line2 + RESET, flush=True)
-                                LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
-                                notify("Zapret: перезапуск службы",
-                                       f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд (сайт+детектор), перезапускаю zapret")
+                                now = time.time()
+                                if now - LAST_RESTART_TS < RESTART_COOLDOWN:
+                                    # защита от флапа: не перезапускаем чаще раза в RESTART_COOLDOWN
+                                    line2 += (" | autorestart пропущен (cooldown: перезапуск был менее "
+                                              f"{RESTART_COOLDOWN // 60} мин назад)")
+                                    fail_streak = 0
+                                    print(YELLOW + "INFO: " + line2 + RESET, flush=True)
+                                    LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                                else:
+                                    # столько подряд — перезапускаем службу zapret (winws),
+                                    # чтобы сбросить DPI-состояние и поднять обход
+                                    res = restart_zapret_service()
+                                    LAST_RESTART_TS = now
+                                    line2 += f" | autorestart -> {res}"
+                                    fail_streak = 0
+                                    print(RED + "СБОЙ: " + line2 + RESET, flush=True)
+                                    LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
+                                    notify("Zapret: перезапуск службы",
+                                           f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд (сайт+детектор), перезапускаю zapret")
                         else:
                             # пока не набралось RESTART_AFTER_FAILS подряд — INFO, не тревога
                             print(YELLOW + "INFO: " + line2 + RESET, flush=True)
