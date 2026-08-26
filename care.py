@@ -73,21 +73,6 @@ def rotate(path: Path, max_size=MAX_LOG_SIZE, keep=KEEP_LOGS):
     path.write_text("", encoding="utf-8")
 
 
-def morning_report(day):
-    """Утренний отчёт в дневник: сколько слотов вчера отправлено будильником."""
-    rotate(SENT)
-    if not SENT.exists():
-        return
-    yesterday = SENT.read_text(encoding="utf-8").splitlines()
-    sent = sum(1 for ln in yesterday if ln.startswith(day))
-    text = f"- 🔔 Будильник: {sent} слотов отправлено ({day}).\n"
-    try:
-        with REPORTS.open("a", encoding="utf-8") as f:
-            f.write("\n" + text)
-    except Exception:
-        pass
-
-
 def notify(title, text):
     ps1 = (
         "Add-Type -AssemblyName System.Windows.Forms\n"
@@ -121,16 +106,24 @@ def mark_sent(day, slot):
 
 
 def morning_report(day):
-    """Утренний отчёт в дневник: сколько слотов вчера отправлено будильником."""
+    """Утренний отчёт в дневник: сколько слотов вчера отправлено будильником.
+
+    Идемпотентен: если отчёт за этот день уже есть в дневнике — не дублируем
+    (защита на случай повторного запуска care.py или перезапуска сторожа,
+    из-за которого раньше появлялись две одинаковые строки будильника).
+    """
     rotate(SENT)
     if not SENT.exists():
         return
     lines = SENT.read_text(encoding="utf-8").splitlines()
     sent = sum(1 for ln in lines if ln.startswith(day))
-    text = f"- 🔔 Будильник: за вчера ({day}) отправлено слотов: {sent}.\n"
+    text = f"- 🔔 Будильник: за вчера ({day}) отправлено слотов: {sent}."
     try:
+        content = REPORTS.read_text(encoding="utf-8") if REPORTS.exists() else ""
+        if text in content:
+            return  # уже записано — не дублируем
         with REPORTS.open("a", encoding="utf-8") as f:
-            f.write(text)
+            f.write(text + "\n")
     except Exception:
         pass
 
