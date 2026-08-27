@@ -352,6 +352,17 @@ def restore_discord():
 def main():
     global LAST_RESTART_TS
     self_test()
+    # Запрос на перезапуск службы zapret БЕЗ прав админа: если есть флаг-файл —
+    # моник (запущен с повышенными правами от сторожа) перезапускает службу сам.
+    # Создать флаг может кто угодно (без админа); применяет его привилегированный моник.
+    RESTART_REQUEST = BASE_DIR / ".restart_zapret_request"
+    if RESTART_REQUEST.exists():
+        try:
+            RESTART_REQUEST.unlink()
+            print(YELLOW + "Запрошен перезапуск службы zapret (флаг-файл)..." + RESET, flush=True)
+            restart_zapret_service()
+        except Exception as exc:
+            print(RED + f"Ошибка перезапуска по флагу: {exc}" + RESET, flush=True)
     interval = int(sys.argv[1]) * 60 if len(sys.argv) > 1 else 120
     print(f"Мониторинг Discord, интервал {interval // 60} мин. Лог: {LOG}")
     was_down = False
