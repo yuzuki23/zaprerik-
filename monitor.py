@@ -34,6 +34,27 @@ RESET = "\033[0m"
 
 LOG = Path(r"C:\запрет\discord_monitor.log")
 STATUS = Path(r"C:\запрет\discord_status.txt")
+
+MAX_LOG_BYTES = 5 * 1024 * 1024  # 5 МБ — при превышении лог ротируется в .old.log
+
+def log_line(text: str) -> None:
+    """Дописывает строку в лог с ротацией при переполнении."""
+    try:
+        if LOG.exists() and LOG.stat().st_size > MAX_LOG_BYTES:
+            old = LOG.with_name("discord_monitor.old.log")
+            try:
+                if old.exists():
+                    old.unlink()
+            except OSError:
+                pass
+            try:
+                LOG.rename(old)
+            except OSError:
+                pass
+        with LOG.open("a", encoding="utf-8") as fh:
+            fh.write(text)
+    except OSError:
+        pass
 BASE_DIR = Path(r"C:\запрет")
 REINSTALL = BASE_DIR / "reinstall_service.py"
 DISCORD_URL = "https://discord.com/"
@@ -258,7 +279,7 @@ def self_test():
         msg = (f"Self-test: Discord НЕ доступен при старте (discord.com -> {code}, "
                f"detector -> {det}) — монитор продолжает наблюдение")
         print(YELLOW + msg + RESET, flush=True)
-    LOG.open("a", encoding="utf-8").write("SELF-TEST " + msg + "\n")
+    log_line("SELF-TEST " + msg + "\n")
 
 
 def rotate_log():
@@ -304,21 +325,6 @@ def restart_zapret_service():
                            creationflags=NO_WINDOW)
         except Exception as exc:
             return f"FAIL пересоздание: {exc}"
-    # Снимаем зависший драйвер WinDivert — частая причина петли падений winws:
-    # после краша драйвер остаётся загруженным и не даёт новому процессу занять порт,
-    # из-за чего winws падает снова. Чистка требует прав админа (моник поднят
-    # сторожом с повышенными правами); без прав — молча пропускаем.
-    try:
-        subprocess.run(["net", "stop", "WinDivert"], capture_output=True, text=True, timeout=20,
-                       creationflags=NO_WINDOW)
-    except Exception:
-        pass
-    try:
-        subprocess.run(["sc", "delete", "WinDivert"], capture_output=True, text=True, timeout=20,
-                       creationflags=NO_WINDOW)
-    except Exception:
-        pass
-    time.sleep(1)
     try:
         subprocess.run(["net", "stop", "zapret"], capture_output=True, text=True, timeout=30,
                        creationflags=NO_WINDOW)
@@ -361,31 +367,12 @@ def restore_discord():
         time.sleep(7)
         if http("https://discord.com/") == "200":
             return f"OK (попытка {attempt}, {res})"
-    # Последняя попытка: автономный winws (restart_zapret.bat) — не требует
-    # управления службой, но требует прав на драйвер WinDivert. Работает, если
-    # моник запущен с правами админа (от сторожа). Если служба всё же упала,
-    # автономный процесс хотя бы поднимет обход.
-    res = restart_zapret()
-    time.sleep(7)
-    if http("https://discord.com/") == "200":
-        return f"OK (автономный winws, {res})"
-    return "FAIL после 5 перезапусков службы + автономного winws"
+    return "FAIL после 5 перезапусков службы"
 
 
 def main():
     global LAST_RESTART_TS
     self_test()
-    # Запрос на перезапуск службы zapret БЕЗ прав админа: если есть флаг-файл —
-    # моник (запущен с повышенными правами от сторожа) перезапускает службу сам.
-    # Создать флаг может кто угодно (без админа); применяет его привилегированный моник.
-    RESTART_REQUEST = BASE_DIR / ".restart_zapret_request"
-    if RESTART_REQUEST.exists():
-        try:
-            RESTART_REQUEST.unlink()
-            print(YELLOW + "Запрошен перезапуск службы zapret (флаг-файл)..." + RESET, flush=True)
-            restart_zapret_service()
-        except Exception as exc:
-            print(RED + f"Ошибка перезапуска по флагу: {exc}" + RESET, flush=True)
     interval = int(sys.argv[1]) * 60 if len(sys.argv) > 1 else 120
     print(f"Мониторинг Discord, интервал {interval // 60} мин. Лог: {LOG}")
     was_down = False
@@ -414,7 +401,7 @@ def main():
                 notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
             was_down = disc_gone
             print(GREEN + "OK: " + line + " | всё в порядке" + RESET, flush=True)
-            LOG.open("a", encoding="utf-8").write("OK " + line + " | всё в порядке\n")
+            log_line("OK " + line + " | всё в порядке\n")
         else:
             # первичный признак сбоя. НЕ пишем «ЧАСТИЧНЫЙ СБОЙ» сразу — сначала
             # быстрые перепроверки, чтобы транзитный микро-блип не попал в статус.
@@ -428,7 +415,7 @@ def main():
                 write_status(ts, codes, detector, detector_src, extra, voice)
                 line2 = line + f" | winws -> {alive} | service -> {svc} | autorestart -> {restore}"
                 print(RED + "СБОЙ: " + line2 + RESET, flush=True)
-                LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
+                log_line("СБОЙ " + line2 + "\n")
                 notify("Zapret: сбой Discord (winws)", f"{ts}\n{restore}")
                 was_down = disc_gone
             else:
@@ -449,7 +436,7 @@ def main():
                         notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
                     was_down = disc_gone
                     print(GREEN + "OK: " + line + " (микро-блип, сам ожил на перепроверке)" + RESET, flush=True)
-                    LOG.open("a", encoding="utf-8").write(
+                    log_line(
                         "OK " + line + " (микро-блип маршрута, сам восстановился на перепроверке)\n")
                 else:
                     # Перепроверки не помогли. Решаем: настоящий блок или мимолётный блип.
@@ -463,7 +450,7 @@ def main():
                         fail_streak = 0
                         line2 = line + " | discord.com доступен — микро-блип не на сайте, обход не трогаем"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
-                        LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                        log_line("INFO " + line2 + "\n")
                     elif det_ok:
                         # Сайт не отвечает при прямой пробе, НО независимый детектор
                         # подтверждает, что Discord доступен. Значит это транзитный
@@ -471,7 +458,7 @@ def main():
                         fail_streak = 0
                         line2 = line + " | discord.com недоступен при пробе, но detector404 доступен — транзитный блип, обход не трогаем"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
-                        LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                        log_line("INFO " + line2 + "\n")
                     elif detector == "ERR":
                         # ОБА детектора недоступны — не можем независимо подтвердить
                         # блок Discord. Не дёргаем обход из-за отказа самих детекторов:
@@ -479,7 +466,7 @@ def main():
                         fail_streak = 0
                         line2 = line + " | оба детектора недоступны — блок не подтверждён, ждём ещё цикл (обход не трогаем)"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
-                        LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                        log_line("INFO " + line2 + "\n")
                     else:
                         # Оба упали: и сайт, и независимый детектор — настоящий блок/падение.
                         failed = ["discord.com"]
@@ -494,7 +481,7 @@ def main():
                                 line2 += " | глобальный сбой Discord (status.discord.com) — перезапуск пропущен"
                                 fail_streak = 0
                                 print(YELLOW + "INFO: " + line2 + RESET, flush=True)
-                                LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                                log_line("INFO " + line2 + "\n")
                             else:
                                 now = time.time()
                                 if now - LAST_RESTART_TS < RESTART_COOLDOWN:
@@ -503,7 +490,7 @@ def main():
                                               f"{RESTART_COOLDOWN // 60} мин назад)")
                                     fail_streak = 0
                                     print(YELLOW + "INFO: " + line2 + RESET, flush=True)
-                                    LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                                    log_line("INFO " + line2 + "\n")
                                 else:
                                     # столько подряд — перезапускаем службу zapret (winws),
                                     # чтобы сбросить DPI-состояние и поднять обход
@@ -512,13 +499,13 @@ def main():
                                     line2 += f" | autorestart -> {res}"
                                     fail_streak = 0
                                     print(RED + "СБОЙ: " + line2 + RESET, flush=True)
-                                    LOG.open("a", encoding="utf-8").write("СБОЙ " + line2 + "\n")
+                                    log_line("СБОЙ " + line2 + "\n")
                                     notify("Zapret: перезапуск службы",
                                            f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд (сайт+детектор), перезапускаю zapret")
                         else:
                             # пока не набралось RESTART_AFTER_FAILS подряд — INFO, не тревога
                             print(YELLOW + "INFO: " + line2 + RESET, flush=True)
-                            LOG.open("a", encoding="utf-8").write("INFO " + line2 + "\n")
+                            log_line("INFO " + line2 + "\n")
                             notify("Zapret: Discord недоступен",
                                     f"{ts}\nМаршрутная блокировка ({', '.join(failed)}), продолжается")
                     was_down = disc_gone
