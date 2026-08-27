@@ -304,6 +304,21 @@ def restart_zapret_service():
                            creationflags=NO_WINDOW)
         except Exception as exc:
             return f"FAIL пересоздание: {exc}"
+    # Снимаем зависший драйвер WinDivert — частая причина петли падений winws:
+    # после краша драйвер остаётся загруженным и не даёт новому процессу занять порт,
+    # из-за чего winws падает снова. Чистка требует прав админа (моник поднят
+    # сторожом с повышенными правами); без прав — молча пропускаем.
+    try:
+        subprocess.run(["net", "stop", "WinDivert"], capture_output=True, text=True, timeout=20,
+                       creationflags=NO_WINDOW)
+    except Exception:
+        pass
+    try:
+        subprocess.run(["sc", "delete", "WinDivert"], capture_output=True, text=True, timeout=20,
+                       creationflags=NO_WINDOW)
+    except Exception:
+        pass
+    time.sleep(1)
     try:
         subprocess.run(["net", "stop", "zapret"], capture_output=True, text=True, timeout=30,
                        creationflags=NO_WINDOW)
@@ -346,7 +361,15 @@ def restore_discord():
         time.sleep(7)
         if http("https://discord.com/") == "200":
             return f"OK (попытка {attempt}, {res})"
-    return "FAIL после 5 перезапусков службы"
+    # Последняя попытка: автономный winws (restart_zapret.bat) — не требует
+    # управления службой, но требует прав на драйвер WinDivert. Работает, если
+    # моник запущен с правами админа (от сторожа). Если служба всё же упала,
+    # автономный процесс хотя бы поднимет обход.
+    res = restart_zapret()
+    time.sleep(7)
+    if http("https://discord.com/") == "200":
+        return f"OK (автономный winws, {res})"
+    return "FAIL после 5 перезапусков службы + автономного winws"
 
 
 def main():

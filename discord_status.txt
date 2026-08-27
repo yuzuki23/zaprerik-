@@ -1,9 +1,9 @@
-Discord — живой статус (обновлено: 2026-08-27 18:49:29)
+Discord — живой статус (обновлено: 2026-08-27 19:08:03)
 ==========================================
 discord.com          -> 200
 gateway.discord.gg   -> 404
-voice ws (голос)     ->  OK
+voice ws (голос)     -> ERR _ssl.c:993: The handshake operation timed out
 detector404.ru/discord -> 200
 ==========================================
 ВЕРДИКТ: ВСЁ РАБОТАЕТ
-Доп.: discordstatus.com: API=operational, indicator=none | cdn.discordapp.com -> 403 | voice_ws:OK
+Доп.: discordstatus.com: API=n/a, indicator=n/a | cdn.discordapp.com -> 000 | voice_ws:ERR _ssl.c:993: The handshake operation timed out
