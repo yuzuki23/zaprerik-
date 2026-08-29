@@ -201,7 +201,8 @@ def monitor_last_activity():
 
 
 def start_zapret():
-    """Поднимает службу zapret (winws). Если служба отсутствует — пересоздаёт её."""
+    """Поднимает службу zapret (winws). Если служба отсутствует — пересоздаёт её.
+    Возвращает True, если winws реально поднялся (проверено опросом STATE/RUNNING)."""
     try:
         if not service_exists():
             log("Служба zapret отсутствует — пересоздаю через reinstall_service.py")
@@ -223,6 +224,26 @@ def start_zapret():
         log(f"Поднятие winws: {msg}")
     except Exception as exc:
         log(f"ОШИБКА поднятия winws: {exc}")
+        return False
+    # Верификация: winws реально RUNNING? sc start может вернуть успех, но служба
+    # ещё в START_PENDING или упала сразу — опрашиваем STATE до ~20 секунд.
+    for _ in range(10):
+        if winws_up():
+            return True
+        time.sleep(2)
+    # Фолбэк: net start (иногда sc start не поднимает из-за гонки WinDivert/драйвера)
+    log("winws не поднялся через sc start — пробуем net start zapret")
+    try:
+        subprocess.run(["net", "start", "zapret"], capture_output=True, text=True,
+                       timeout=30, creationflags=NO_WINDOW)
+    except Exception as exc:
+        log(f"ОШИБКА net start: {exc}")
+    for _ in range(10):
+        if winws_up():
+            return True
+        time.sleep(2)
+    log("winws НЕ поднялся после всех попыток (вероятен краш winws.exe)")
+    return False
 
 
 # Ежедневный перезапуск сторожа в заданный час, чтобы правки кода
@@ -390,11 +411,14 @@ def _run():
         # Надзор за winws
         if not winws_up():
             now = time.time()
-            last = entry_up.get("last_down") if entry_up else None
-            if last is None or now - last > 90:
-                log("winws НЕ РАБОТАЕТ — поднимаю службу zapret")
-                start_zapret()
-            entry_up["last_down"] = now
+            last = entry_up.get("last_down")
+            if last is None or now - last > 45:
+                ok = start_zapret()
+                if ok:
+                    log("winws поднят (авто-восстановление сработало)")
+                else:
+                    log("winws НЕ поднялся — повторная попытка через 45с")
+                entry_up["last_down"] = now
         time.sleep(10)
 
 
