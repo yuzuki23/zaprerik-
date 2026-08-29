@@ -7,9 +7,13 @@
     python release.py 3.0.7      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitVerse
     python release.py 3.0.7 notes.txt
 
-Создание релиза на GitVerse делается через твой Chrome (Playwright + CDP):
-скрипт подключается к уже открытому Chrome с --remote-debugging-port=9222,
-а если его нет — сам запускает Chrome с твоим профилем и отладкой.
+Создание релиза на GitVerse:
+ - Предпочтительно по API с GitVerse PAT (без Chrome и без входа):
+   токен берётся из переменной GITVERSE_TOKEN или файла gitverse_token.txt
+   (он в .gitignore, не коммитится). PAT создаётся один раз в настройках GitVerse.
+ - Иначе — запасной путь через твой Chrome (Playwright + CDP): скрипт
+   подключается к уже открытому Chrome с --remote-debugging-port=9222,
+   а если его нет — сам запускает Chrome с твоим профилем и отладкой.
 """
 import json
 import os
@@ -19,6 +23,9 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -190,22 +197,43 @@ def find_chrome():
     return None
 
 
+RELEASE_PROFILE = PROJ / "_release_profile"
+_PROFILE_EXCLUDES = ["Cache", "Code Cache", "GPUCache", "Service Worker", "Session Storage",
+                     "IndexedDB", "blob_storage", "Extensions", "File System", "Media Cache",
+                     "Optimization Guide", "Segmentation", "Download Service", "Subresource Filter",
+                     "Crashpad", "Recovery", "GrShaderCache", "ShaderCache", "Site Settings"]
+
+
 def ensure_chrome():
     if chrome_debug_up():
         return
     exe = find_chrome()
     if not exe:
         raise RuntimeError("Chrome не найден")
-    profile = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data")
+    # Копируем живой профиль во временный каталог, чтобы не трогать открытый Chrome
+    # и не требовать его закрытия. Cookies сессии GitVerse переносятся (DPAPI привязан
+    # к учётке), поэтому вход на сайт сохраняется.
+    src = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default")
+    dst = str(RELEASE_PROFILE / "Default")
+    if os.path.exists(src):
+        args = ["robocopy", src, dst, "/E", "/COPY:DAT", "/R:1", "/W:1",
+                "/NFL", "/NDL", "/NJH", "/NJS"]
+        for e in _PROFILE_EXCLUDES:
+            args += ["/XD", e]
+        args += ["/XF", "Lock", "Cookies-journal", "SingletonLock"]
+        try:
+            subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+        except Exception:
+            pass
     subprocess.Popen(
         [exe, "--remote-debugging-port=9222", "--remote-allow-origins=*",
-         f"--user-data-dir={profile}", "--no-first-run", "--no-default-browser-check"],
+         f"--user-data-dir={str(RELEASE_PROFILE)}", "--no-first-run", "--no-default-browser-check"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(30):
         if chrome_debug_up():
             return
         time.sleep(1)
-    raise RuntimeError("Chrome с отладкой не запустился — закрой Chrome и повтори")
+    raise RuntimeError("Chrome с отладкой не запустился")
 
 
 def connect():
@@ -272,16 +300,110 @@ def create_release(page, tag, prev, desc_override=None, asset_path=None, _retry=
         return create_release(page, tag, prev, desc_override, asset_path, _retry=False)
 
 
+# ---------- API-релиз (GitVerse PAT, без Chrome/входа) ----------
+API_BASE = "https://gitverse.ru/sbt/api/v1"
+
+
+def get_gitverse_token():
+    env = os.environ.get("GITVERSE_TOKEN")
+    if env:
+        return env.strip()
+    f = PROJ / "gitverse_token.txt"
+    if f.exists():
+        return f.read_text(encoding="utf-8-sig").strip()
+    return None
+
+
+def _api(method, path, token, data=None, raw=None, ctype="application/json"):
+    url = API_BASE + path
+    body = json.dumps(data).encode() if data is not None else raw
+    req = urllib.request.Request(url, data=body, method=method)
+    req.add_header("Authorization", f"token {token}")
+    req.add_header("Accept", "application/json")
+    if body is not None:
+        req.add_header("Content-Type", ctype)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+    except Exception as e:  # pragma: no cover
+        return -1, str(e)
+
+
+def find_release_id(tag, token):
+    st, out = _api("GET", f"/repos/{REPO_GV}/releases?limit=200", token)
+    if st != 200:
+        return None
+    try:
+        items = json.loads(out).get("data", [])
+    except Exception:
+        return None
+    for rel in items:
+        if rel.get("tagName") == tag:
+            return rel.get("id")
+    return None
+
+
+def create_release_api(tag, prev, desc_override=None, asset_path=None, token=None):
+    if token is None:
+        token = get_gitverse_token()
+    if not token:
+        return False, "нет GitVerse токена (GITVERSE_TOKEN / gitverse_token.txt)"
+    desc = desc_override if desc_override is not None else (notes_for(tag) or changelog(tag, prev))
+    rid = find_release_id(tag, token)
+    if rid is None:
+        st, out = _api("POST", f"/repos/{REPO_GV}/releases", token,
+                       data={"tag_name": tag, "name": tag, "body": desc,
+                             "draft": False, "prerelease": False})
+        if st not in (200, 201):
+            return False, f"создание релиза {st}: {out[:300]}"
+        try:
+            rid = json.loads(out).get("id")
+        except Exception:
+            rid = None
+    else:
+        _api("PATCH", f"/repos/{REPO_GV}/releases/{rid}", token,
+             data={"body": desc, "name": tag})
+    if rid and asset_path and Path(asset_path).exists():
+        data = Path(asset_path).read_bytes()
+        name = Path(asset_path).name
+        st, out = _api("POST",
+                       f"/repos/{REPO_GV}/releases/{rid}/assets?name={urllib.parse.quote(name)}",
+                       token, raw=data, ctype="application/octet-stream")
+        if st not in (200, 201):
+            low = (out or "").lower()
+            if st != 409 and "already" not in low:
+                return False, f"загрузка ассета {st}: {out[:300]}"
+    return True, f"{BASE}/{REPO_GV}/releases/tag/{tag}"
+
+
+def publish_release(tag, notes=None, rar=None):
+    """Создать релиз: по API при наличии токена, иначе (или при ошибке API) — через Chrome."""
+    tags = git_tags()
+    prev = None
+    for t in tags:
+        if t == tag:
+            break
+        prev = t
+    token = get_gitverse_token()
+    if token:
+        ok, msg = create_release_api(tag, prev, desc_override=notes, asset_path=rar, token=token)
+        if ok:
+            return ok, msg
+        print(f"[!] API-релиз не вышел ({msg}), фолбэк на Chrome")
+    _, _, page = connect()
+    return create_release(page, tag, prev, desc_override=notes, asset_path=rar)
+
+
 # ---------- режимы ----------
 def cmd_all():
-    _, _, page = connect()
     tags = git_tags()
     prev = None
     for tag in tags:
-        ok, msg = create_release(page, tag, prev)
+        ok, msg = publish_release(tag)
         print(f"[{'+' if ok else '='}] {tag}: {msg}")
         prev = tag
-        page.wait_for_timeout(800)
     print("[*] готово ->", f"{BASE}/{REPO_GV}/releases")
 
 
@@ -311,14 +433,7 @@ def cmd_version(version, notes_file=None):
     print("  архив:", rar)
 
     print("[5/5] релиз GitVerse")
-    _, _, page = connect()
-    tags = git_tags()
-    prev = None
-    for t in tags:
-        if t == tag:
-            break
-        prev = t
-    ok, msg = create_release(page, tag, prev, desc_override=notes, asset_path=rar)
+    ok, msg = publish_release(tag, notes, rar)
     if ok:
         print("  релиз:", f"{BASE}/{REPO_GV}/releases/tag/{tag}")
     else:
