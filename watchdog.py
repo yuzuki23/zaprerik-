@@ -175,6 +175,47 @@ def winws_up():
         return True  # не можем проверить — не трогаем
 
 
+def winws_pid():
+    """Текущий PID процесса winws.exe (или None, если процесса нет)."""
+    try:
+        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq winws.exe", "/FO", "CSV", "/NH"],
+                           capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
+        for line in r.stdout.splitlines():
+            parts = [p.strip().strip('"') for p in line.split(",")]
+            if parts and parts[0].lower() == "winws.exe" and len(parts) > 1 and parts[1].isdigit():
+                return int(parts[1])
+    except Exception:
+        pass
+    return None
+
+
+def recent_winws_events(mins=6):
+    """Причины остановки winws из журналов Windows за последние {mins} минут.
+
+    Собирает события Service Control Manager (System), касающиеся службы zapret,
+    и события сбоев/ошибок приложений (Application), упоминающие winws.
+    Возвращает строку 'время [журнал] текст' или "", если ничего не найдено."""
+    try:
+        since = datetime.fromtimestamp(time.time() - mins * 60).strftime("%Y-%m-%d %H:%M:%S")
+        script = (
+            "$cut=Get-Date '{since}';"
+            "$ev=@();"
+            "$ev+=@(Get-WinEvent -FilterHashtable @{{LogName='System';StartTime=$cut}} -ErrorAction SilentlyContinue"
+            " | Where-Object {{ $_.ProviderName -eq 'Service Control Manager' -and $_.Message -match 'zapret' }});"
+            "$ev+=@(Get-WinEvent -FilterHashtable @{{LogName='Application';StartTime=$cut}} -ErrorAction SilentlyContinue"
+            " | Where-Object {{ $_.Message -match 'winws' }});"
+            "if($ev.Count -gt 0){{$ev|Sort-Object TimeCreated|ForEach-Object{{"
+            "$_.TimeCreated.ToString('HH:mm:ss')+' ['+$_.ProviderName+'] '+"
+            "$_.Message.Substring(0,[Math]::Min(160,$_.Message.Length)).Replace(\"`n\",' / ')}}}}"
+        ).format(since=since)
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                           capture_output=True, text=True, timeout=30, creationflags=NO_WINDOW)
+        lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        return "\n".join(lines) if lines else ""
+    except Exception:
+        return ""
+
+
 def service_exists():
     """True, если служба zapret зарегистрирована в системе."""
     try:
@@ -410,19 +451,51 @@ def _run():
 
         # Надзор за winws
         if not winws_up():
+            # winws упал/остановлен. Прежде чем поднимать — выясняем ПОЧЕМУ:
+            # собираем события SCM/ошибки приложений за последние ~6 минут
+            # (код выхода службы, «перезапускается», сбои winws.exe и т.п.).
             now = time.time()
             last = entry_up.get("last_down")
             if last is None or now - last > 45:
+                pid_before = winws_state.get("pid")
+                since = winws_state.get("since")
+                live = "?" if since is None else f"~{max(0, int((now - since) // 60))} мин"
+                reason = recent_winws_events(6)
+                if reason:
+                    log(f"winws остановился (был PID {pid_before}, жил {live}). Причина из событий Windows:\n{reason}")
+                else:
+                    log(f"winws остановился (был PID {pid_before}, жил {live}) — событий об остановке не найдено")
                 ok = start_zapret()
                 if ok:
-                    log("winws поднят (авто-восстановление сработало)")
+                    new_pid = winws_pid()
+                    log(f"winws поднят (авто-восстановление, новый PID {new_pid})")
                 else:
                     log("winws НЕ поднялся — повторная попытка через 45с")
                 entry_up["last_down"] = now
+                winws_state["pid"] = winws_pid()
+                winws_state["since"] = time.time()
+        else:
+            # winws жив. Ловим «молчаливые» автоперезапуски без сбоя Discord:
+            # смена PID процесса winws.exe (возможна из-за Recovery службы).
+            pid = winws_pid()
+            old = winws_state.get("pid")
+            if pid is not None:
+                if old is not None and old != pid:
+                    since = winws_state.get("since")
+                    live = "?" if since is None else f"~{max(0, int((time.time() - since) // 60))} мин (с момента последнего чека)"
+                    log(f"winws ПЕРЕЗАПУЩЕН в фоне: PID {old} -> {pid} ({live})")
+                winws_state["pid"] = pid
+                winws_state["since"] = time.time()
+            else:
+                # процесса в тасклисте нет, хотя служба RUNNING — неопределённое
+                # состояние, даём следующему циклу разобраться.
+                winws_state["pid"] = None
+                winws_state["since"] = None
         time.sleep(10)
 
 
 entry_up = {"last_down": None}
+winws_state = {"pid": None, "since": None}
 
 
 if __name__ == "__main__":
