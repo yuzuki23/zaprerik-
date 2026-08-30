@@ -211,20 +211,31 @@ def ensure_chrome():
     if not exe:
         raise RuntimeError("Chrome не найден")
     # Копируем живой профиль во временный каталог, чтобы не трогать открытый Chrome
-    # и не требовать его закрытия. Cookies сессии GitVerse переносятся (DPAPI привязан
-    # к учётке), поэтому вход на сайт сохраняется.
-    src = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default")
-    dst = str(RELEASE_PROFILE / "Default")
-    if os.path.exists(src):
-        args = ["robocopy", src, dst, "/E", "/COPY:DAT", "/R:1", "/W:1",
-                "/NFL", "/NDL", "/NJH", "/NJS"]
-        for e in _PROFILE_EXCLUDES:
-            args += ["/XD", e]
-        args += ["/XF", "Lock", "Cookies-journal", "SingletonLock"]
-        try:
-            subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
-        except Exception:
-            pass
+    # и не требовать его закрытия. Cookies (v10/v20) привязаны к учётке, поэтому
+    # скопированные куки расшифровываются (нужен Local State = ключ шифрования).
+    # ВАЖНО: если во временном профиле уже есть своя база кук (например, после
+    # ручного входа в GitVerse один раз) — НЕ перезатираем её свежей копией,
+    # иначе потеряем рабочую сессию релиза.
+    has_cookies = (RELEASE_PROFILE / "Default" / "Network" / "Cookies").exists()
+    if not has_cookies:
+        ls_src = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Local State")
+        if os.path.exists(ls_src):
+            try:
+                shutil.copy2(ls_src, str(RELEASE_PROFILE / "Local State"))
+            except Exception:
+                pass
+        src = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default")
+        dst = str(RELEASE_PROFILE / "Default")
+        if os.path.exists(src):
+            args = ["robocopy", src, dst, "/E", "/COPY:DAT", "/R:1", "/W:1",
+                    "/NFL", "/NDL", "/NJH", "/NJS"]
+            for e in _PROFILE_EXCLUDES:
+                args += ["/XD", e]
+            args += ["/XF", "Lock", "Cookies-journal", "SingletonLock"]
+            try:
+                subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+            except Exception:
+                pass
     subprocess.Popen(
         [exe, "--remote-debugging-port=9222", "--remote-allow-origins=*",
          f"--user-data-dir={str(RELEASE_PROFILE)}", "--no-first-run", "--no-default-browser-check"],
