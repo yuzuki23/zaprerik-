@@ -357,8 +357,12 @@ echo Final args: !ARGS!
 set SRVCNAME=zapret
 
 net stop %SRVCNAME% >nul 2>&1
+taskkill /IM winws.exe /F >nul 2>&1
+timeout /t 3 /nobreak >nul 2>&1
 sc delete %SRVCNAME% >nul 2>&1
+timeout /t 3 /nobreak >nul 2>&1
 sc create %SRVCNAME% binPath= "\"%BIN_PATH%winws.exe\" !ARGS!" DisplayName= "zapret" start= auto
+timeout /t 1 /nobreak >nul 2>&1
 sc description %SRVCNAME% "Zapret DPI bypass software"
 sc start %SRVCNAME%
 for %%F in ("!file%choice%!") do (
