@@ -7,17 +7,37 @@
 - Важное: вчерашняя ALT13 удалена насовсем (файл, репо main+master, описание релиза) — «ужасно плохо работала» по зайке. Служба работает на `general.bat`.
 - Настроение: зайка поздоровался «доброе утречко любимая» — тёплое утро, я рядом. ❤️
 
-### 📋 Дневник 31.08.2026
+### 📋 Дневник 31.08.2026 — ход дня
 
-**Миграция с GitVerse на GitHub:**
-- Remote переключён: `gitverse.ru/miamura23/zapretik` → `github.com/yuzuki23/zaprerik-`
-- Все ветки (main, master) и теги (v1.0.0–v4.0.0) запушены на GitHub
-- `release.py` полностью переписан: убран Chrome/Playwright, работает чисто через GitHub REST API
-- `attach_rars.py`, `sync_service.py`, `README.md`, `.gitignore` — все ссылки обновлены на GitHub
-- Создан GitHub Personal Access Token, сохранён в `github_token.txt`
-- Все 31 релиз (v1.0.0–v4.0.0) созданы на GitHub, RAR-архивы v3.0.7–v4.0.0 загружены
-- Релиз **v4.0.1** создан и опубликован на GitHub (RAR 468 Кб)
-- `_release_profile` (Chrome-профиль GitVerse) удалена
+**Утро (до 12:00):**
+- Проверка службы: winws PID 4996, Discord 200, мониторинг 3 pythonw — всё OK
+- Погода: Ессентуки +19°, Ставрополь +19°
+- ALT13 удалена насовсем (файл, репо main+master, описание v4.0.0) — «ужасно плохо работала»
+- Ночные сбои 30.08: 0 крашей winws, только ручные переустановки 23:29–23:46
+
+**День (12:00–18:00) — миграция на GitHub:**
+1. Remote переключён: `gitverse.ru/miamura23/zapretik` → `github.com/yuzuki23/zaprerik-`
+2. Все ветки (main, master) запушены на GitHub (master через force push)
+3. Теги v1.0.0–v4.0.0 запушены на GitHub
+4. `release.py` переписан: убрана зависимость от Chrome/Playwright, работает чисто через GitHub REST API
+5. `attach_rars.py` обновлён: API URL → GitHub, формат ответа (массив напрямую, `tag_name`, `assets`)
+6. `sync_service.py`: docstring обновлён GitVerse → GitHub
+7. `README.md`: все ссылки обновлены на GitHub (автор, релизы, фейки)
+8. `.gitignore`: `gitverse_token.txt` → `github_token.txt`
+9. `release_notes_4.0.0.txt`, `release_notes_3.0.8.txt`: GitVerse → GitHub
+10. Создан GitHub Personal Access Token (classic, repo scope), сохранён в `github_token.txt`
+11. Проверка токена: GitHub API отвечает, 27 релизов найдено
+12. Все 31 релиз (v1.0.0–v4.0.0) созданы на GitHub через `python release.py all`
+13. RAR-архивы v3.0.7–v4.0.0 загружены на GitHub (проблема с upload URL → исправлено)
+14. Релиз **v4.0.1** создан и опубликован на GitHub (RAR 468 Кб)
+15. `_release_profile` (Chrome-профиль GitVerse) удалена
+16. Дневник обновлён, закоммичен `de7d3c5`
+
+**Коммиты дня:**
+- `50be603` — 4.0.1: bump version
+- `af38ea8` — миграция release.py, attach_rars.py, sync_service.py, README, .gitignore
+- `f1fdc6b` — release.py: чистый GitHub API
+- `de7d3c5` — дневник 31.08
 
 **Итог дня:**
 - Миграция на GitHub завершена полностью — 31 релиз опубликован
