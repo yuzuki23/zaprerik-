@@ -353,6 +353,41 @@ def check_winws_hash():
         log("ВНИМАНИЕ: winws.exe ИЗМЕНИЛСЯ (антивирус/подмена). Эталон: " + known[:16] + "... сейчас: " + h[:16] + "...")
 
 
+def log_winws_memory():
+    """Логирует потребление памяти winws (RSS в МБ) для диагностики тихих падений."""
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='winws.exe'\" | "
+             "ForEach-Object { [math]::Round($_.WorkingSetSize / 1MB, 1) }"],
+            capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if line and line.replace(".", "").isdigit():
+                mb = float(line)
+                log(f"winws память: RSS {mb} МБ")
+                if mb > 400:
+                    log(f"ВНИМАНИЕ: winws использует {mb} МБ — возможна утечка памяти")
+                return
+    except Exception:
+        pass
+
+
+def rotate_by_lines(path: Path, max_lines=2000, keep_lines=500):
+    """Если лог превысил max_lines — оставляет только последние keep_lines."""
+    if not path.exists():
+        return
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > max_lines:
+            trimmed = lines[-keep_lines:]
+            path.write_text("".join(trimmed), encoding="utf-8")
+            log(f"Ротация лога: {len(lines)} -> {len(trimmed)} строк")
+    except Exception:
+        pass
+
+
 def main():
     if not acquire_lock():
         print("Watchdog уже запущен (lock-файл занят) — выход.", flush=True)
@@ -401,6 +436,7 @@ def kill_stray_scripts():
 
 def _run():
     rotate(WATCHDOG_LOG)
+    rotate_by_lines(WATCHDOG_LOG)
     log("Watchdog запущен. Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     kill_stray_scripts()
     check_winws_hash()
@@ -408,6 +444,8 @@ def _run():
         entry["proc"] = start_proc(entry)
         entry["down_since"] = None
         time.sleep(1)
+
+    cycle = 0
 
     while True:
         # сам перезапуск, если изменился собственный код сторожа
@@ -492,6 +530,11 @@ def _run():
                 winws_state["pid"] = None
                 winws_state["since"] = None
         time.sleep(10)
+        cycle += 1
+        # Каждые ~10 минут (60 циклов * 10 сек) — логируем память winws
+        if cycle % 60 == 0:
+            log_winws_memory()
+            rotate_by_lines(WATCHDOG_LOG)
 
 
 entry_up = {"last_down": None}
