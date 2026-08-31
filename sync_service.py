@@ -5,15 +5,10 @@
 версии и коммитит/пушит изменения в .service (hosts, ipset-service.txt, version.txt),
 только если они реально изменились.
 
-Пушит в ТЕКУЩУЮ ветку (main) и в дефолтную (master), потому что на GitHub
-дефолтная ветка — master, и именно её видит пользователь. master обновляется
-через временный git-worktree, чтобы не трогать живой каталог работающего сервиса.
+Пушит в ТЕКУЩУЮ ветку (main). Master = main на GitHub, отдельная синхронизация не нужна.
 """
 import re
-import shutil
 import subprocess
-import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -21,7 +16,6 @@ PROJ = Path(r"C:\запрет")
 SVC = PROJ / ".service"
 SERVICE_BAT = PROJ / "service.bat"
 LOG = PROJ / "service_sync.log"
-DEFAULT_BRANCH = "master"
 FILES = ["version.txt", "hosts", "ipset-service.txt"]
 
 
@@ -36,7 +30,7 @@ def log(msg):
     print(line, end="")
 
 
-def run(cmd, cwd=None, check=True):
+def run(cmd, cwd=None):
     r = subprocess.run(cmd, cwd=str(cwd) if cwd else str(PROJ),
                         capture_output=True, text=True,
                         encoding="utf-8", errors="replace")
@@ -67,12 +61,18 @@ def update_version_txt(ver):
     return False
 
 
-def push_current_branch(ver, branch):
+def main():
+    ver = current_version()
+    log(f"старт, версия={ver}")
+    branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])[1].strip() or "main"
+
+    update_version_txt(ver)
+
     run(["git", "fetch", "origin", branch], check=False)
     behind = run(["git", "rev-list", "--count", f"{branch}..origin/{branch}"])[1].strip()
     if behind not in ("", "0"):
         log(f"{branch} позади remote на {behind} — пропускаю push (сделай pull вручную)")
-        return False
+        return
 
     for f in FILES:
         p = SVC / f
@@ -84,68 +84,18 @@ def push_current_branch(ver, branch):
     rc, out = run(["git", "diff", "--cached", "--stat", "--", ".service"])
     if not out.strip():
         log(f"{branch}: нет изменений в .service")
-        return False
+        return
 
     rc, out = run(["git", "commit", "-m", f"bump version.txt to {ver} (label sync)"], check=False)
     if rc != 0:
         log(f"{branch}: коммит не удался: " + out.strip()[:200])
-        return False
+        return
 
     rc, out = run(["git", "push", "origin", branch], check=False)
     if rc == 0:
         log(f"OK: запушено в {branch}")
-        return True
-    log(f"{branch}: PUSH НЕ УДАЛСЯ: " + out.strip()[:200])
-    return False
-
-
-def push_default_branch(ver):
-    """Обновляет дефолтную ветку (master) копированием .service через временный worktree."""
-    tmp = Path(tempfile.gettempdir()) / "zapret_master_sync"
-    shutil.rmtree(tmp, ignore_errors=True)
-    run(["git", "fetch", "origin", DEFAULT_BRANCH], check=False)
-    run(["git", "worktree", "prune"], check=False)
-    rc, out = run(["git", "worktree", "add", "--force", str(tmp), f"origin/{DEFAULT_BRANCH}"], check=False)
-    if rc != 0:
-        log("master: не удалось создать worktree: " + out.strip()[:200])
-        shutil.rmtree(tmp, ignore_errors=True)
-        return False
-    try:
-        dst = tmp / ".service"
-        dst.mkdir(parents=True, exist_ok=True)
-        for name in FILES:
-            src = SVC / name
-            if src.exists():
-                shutil.copy2(src, dst / name)
-        run(["git", "add", "--", ".service"], cwd=tmp, check=False)
-        rc, out = run(["git", "diff", "--cached", "--stat", "--", ".service"], cwd=tmp)
-        if not out.strip():
-            log("master: нет изменений в .service")
-            return False
-        rc, out = run(["git", "commit", "-m", f"bump version.txt to {ver} (label sync)"], cwd=tmp, check=False)
-        if rc != 0:
-            log("master: коммит не удался: " + out.strip()[:200])
-            return False
-        rc, out = run(["git", "push", "origin", "HEAD:refs/heads/" + DEFAULT_BRANCH], cwd=tmp, check=False)
-        if rc == 0:
-            log("OK: запушено в master (worktree)")
-            return True
-        log("master: PUSH НЕ УДАЛСЯ: " + out.strip()[:200])
-        return False
-    finally:
-        run(["git", "worktree", "remove", "--force", str(tmp)], check=False)
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def main():
-    ver = current_version()
-    log(f"старт, версия={ver}")
-    branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])[1].strip() or "main"
-
-    update_version_txt(ver)
-    push_current_branch(ver, branch)
-    if DEFAULT_BRANCH != branch:
-        push_default_branch(ver)
+    else:
+        log(f"{branch}: PUSH НЕ УДАЛСЯ: " + out.strip()[:200])
 
 
 if __name__ == "__main__":
