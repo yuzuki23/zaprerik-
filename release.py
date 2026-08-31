@@ -1,26 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Автоматический релиз Zapretik (GitHub).
+"""Автоматический релиз Zapretik (GitHub API).
 
 Запуск (из C:\\запрет):
     python release.py            # создать релизы GitHub для ВСЕХ тегов, которых ещё нет
     python release.py all        # то же самое
-    python release.py 3.0.7      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitHub
-    python release.py 3.0.7 notes.txt
+    python release.py 4.0.2      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitHub
+    python release.py 4.0.2 notes.txt
 
 Создание релиза на GitHub:
- - Через GitHub CLI (gh): скрипт вызывает `gh release create` с архивом.
- - Иначе — через GitHub API с токеном: токен берётся из переменной GITHUB_TOKEN
-   или файла github_token.txt (он в .gitignore, не коммитится). PAT создаётся
-   один раз в настройках GitHub (Settings → Developer settings → Fine-grained tokens).
- - Иначе — запасной путь через твой Chrome (Playwright + CDP): скрипт
-   подключается к уже открытому Chrome с --remote-debugging-port=9222,
-   а если его нет — сам запускает Chrome с твоим профилем и отладкой.
+ - Через GitHub REST API с токеном: токен берётся из переменной GITHUB_TOKEN
+   или файла github_token.txt (в .gitignore, не коммитится).
 """
 import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -33,8 +27,7 @@ PROJ = Path(r"C:\запрет")
 RAR = Path(r"C:\Program Files\WinRAR\Rar.exe")
 OUT = Path(r"C:\Users\Leonid\AppData\Local\Temp\opencode\zapret_test")
 REPO_GH = "yuzuki23/zaprerik-"
-BASE = "https://github.com"
-CDP = "http://127.0.0.1:9222"
+API_BASE = "https://api.github.com"
 SERVICE_BAT = PROJ / "service.bat"
 MAIN_PY = PROJ / "main.py"
 RETRIES = 12
@@ -82,7 +75,6 @@ def changelog(tag, prev):
 
 
 def notes_for(tag):
-    """Найти файл с заметками релиза (как раньше на GitHub)."""
     version = tag.lstrip("v")
     for name in (
         f"release_notes_{version}.txt",
@@ -105,6 +97,7 @@ def replace_first(path, pattern, repl):
         path.write_text(new, encoding="utf-8")
 
 
+# ---------- RAR ----------
 def build_rar(tag):
     OUT.mkdir(parents=True, exist_ok=True)
     rar = OUT / f"zaprerik-{tag}.rar"
@@ -119,8 +112,7 @@ def build_rar(tag):
 
 
 def build_rar_for_tag(tag):
-    """Собрать RAR для исторического тега, не трогая живой сервис:
-    git archive тега -> tmp, копия бинарей (winws/WinDivert) из PROJ, упаковка в RAR."""
+    """Собрать RAR для исторического тега, не трогая живой сервис."""
     OUT.mkdir(parents=True, exist_ok=True)
     rar = OUT / f"zaprerik-{tag}.rar"
     if rar.exists():
@@ -150,170 +142,7 @@ def build_rar_for_tag(tag):
     return rar
 
 
-def release_edit_url(tag):
-    return f"{BASE}/{REPO_GH}/releases/edit/{tag}"
-
-
-def delete_release(page, tag):
-    page.goto(release_edit_url(tag), wait_until="domcontentloaded")
-    page.wait_for_url(f"**/releases/edit/{tag}", timeout=60000)
-    page.wait_for_selector(".ProseMirror", timeout=15000)
-    page.wait_for_timeout(500)
-    delbtn = page.locator('button:has-text("Удалить релиз")')
-    if delbtn.count() == 0:
-        return False, "нет кнопки удаления"
-    delbtn.first.click()
-    try:
-        page.wait_for_selector('div[role="dialog"]', timeout=5000)
-    except Exception:
-        return False, "модалка удаления не открылась"
-    cfm = page.locator('div[role="dialog"] button:has-text("Удалить")')
-    if cfm.count() == 0:
-        return False, "нет кнопки подтверждения"
-    cfm.first.click()
-    page.wait_for_timeout(4000)
-    return True, page.url
-
-
-# ---------- Chrome / CDP ----------
-def chrome_debug_up():
-    try:
-        s = socket.create_connection(("127.0.0.1", 9222), timeout=2)
-        s.close()
-        return True
-    except OSError:
-        return False
-
-
-def find_chrome():
-    for p in [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-    ]:
-        if os.path.exists(p):
-            return p
-    return None
-
-
-RELEASE_PROFILE = PROJ / "_release_profile"
-_PROFILE_EXCLUDES = ["Cache", "Code Cache", "GPUCache", "Service Worker", "Session Storage",
-                     "IndexedDB", "blob_storage", "Extensions", "File System", "Media Cache",
-                     "Optimization Guide", "Segmentation", "Download Service", "Subresource Filter",
-                     "Crashpad", "Recovery", "GrShaderCache", "ShaderCache", "Site Settings"]
-
-
-def ensure_chrome():
-    if chrome_debug_up():
-        return
-    exe = find_chrome()
-    if not exe:
-        raise RuntimeError("Chrome не найден")
-    # Копируем живой профиль во временный каталог, чтобы не трогать открытый Chrome
-    # и не требовать его закрытия. Cookies (v10/v20) привязаны к учётке, поэтому
-    # скопированные куки расшифровываются (нужен Local State = ключ шифрования).
-    # ВАЖНО: если во временном профиле уже есть своя база кук (например, после
-    # ручного входа в GitHub один раз) — НЕ перезатираем её свежей копией,
-    # иначе потеряем рабочую сессию релиза.
-    has_cookies = (RELEASE_PROFILE / "Default" / "Network" / "Cookies").exists()
-    if not has_cookies:
-        ls_src = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Local State")
-        if os.path.exists(ls_src):
-            try:
-                shutil.copy2(ls_src, str(RELEASE_PROFILE / "Local State"))
-            except Exception:
-                pass
-        src = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default")
-        dst = str(RELEASE_PROFILE / "Default")
-        if os.path.exists(src):
-            args = ["robocopy", src, dst, "/E", "/COPY:DAT", "/R:1", "/W:1",
-                    "/NFL", "/NDL", "/NJH", "/NJS"]
-            for e in _PROFILE_EXCLUDES:
-                args += ["/XD", e]
-            args += ["/XF", "Lock", "Cookies-journal", "SingletonLock"]
-            try:
-                subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
-            except Exception:
-                pass
-    subprocess.Popen(
-        [exe, "--remote-debugging-port=9222", "--remote-allow-origins=*",
-         f"--user-data-dir={str(RELEASE_PROFILE)}", "--no-first-run", "--no-default-browser-check"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(30):
-        if chrome_debug_up():
-            return
-        time.sleep(1)
-    raise RuntimeError("Chrome с отладкой не запустился")
-
-
-def connect():
-    ensure_chrome()
-    p = sync_playwright().start()
-    browser = p.chromium.connect_over_cdp(CDP)
-    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
-    page.set_default_timeout(30000)
-    return p, browser, page
-
-
-# ---------- создание релиза на GitHub ----------
-def create_release(page, tag, prev, desc_override=None, asset_path=None, _retry=True):
-    page.goto(f"{BASE}/{REPO_GH}/releases/new", wait_until="domcontentloaded")
-    page.wait_for_url("**/yuzuki23/zaprerik-/releases/new", timeout=60000)
-    page.wait_for_timeout(500)
-
-    cb = page.locator('button:has-text("Выберите тег")')
-    if cb.count() == 0:
-        return False, "нет комбобокса тега"
-    cb.first.click()
-    page.wait_for_timeout(600)
-    opt = page.get_by_role("option", name=tag, exact=True)
-    if opt.count() == 0:
-        return False, "тег не найден в списке"
-    opt.first.click()
-    page.wait_for_timeout(300)
-
-    page.locator('input[name="title"]').fill(tag)
-
-    desc = desc_override if desc_override is not None else (notes_for(tag) or changelog(tag, prev))
-    page.locator(".ProseMirror").click()
-    page.keyboard.insert_text(desc)
-    page.wait_for_timeout(300)
-
-    if asset_path:
-        fi = page.locator('input[type="file"]')
-        if fi.count():
-            fi.first.set_input_files(str(asset_path))
-            page.wait_for_timeout(1500)
-        else:
-            print("[!] нет file input для вложения", tag)
-
-    pub = page.locator('button:has-text("Опубликовать релиз")')
-    if pub.count() == 0:
-        return False, "нет кнопки публикации"
-    page.wait_for_timeout(300)
-    if pub.first.is_disabled():
-        return False, "кнопка заблокирована (релиз уже есть?)"
-    pub.first.click()
-    try:
-        page.wait_for_function("() => !location.href.includes('releases/new')", timeout=30000)
-        return True, page.url
-    except Exception as e:
-        if not _retry:
-            return False, f"ожидание публикации: {e}"
-        # фолбэк: 403 на создании — удаляем (если есть) и пересоздаём
-        print(f"[!] создание {tag} не прошло ({e}), фолбэк удалить+пересоздать")
-        try:
-            delete_release(page, tag)
-        except Exception:
-            pass
-        return create_release(page, tag, prev, desc_override, asset_path, _retry=False)
-
-
-# ---------- API-релиз (GitHub PAT, без Chrome/входа) ----------
-API_BASE = "https://api.github.com"
-
-
+# ---------- GitHub API ----------
 def get_github_token():
     env = os.environ.get("GITHUB_TOKEN")
     if env:
@@ -324,34 +153,48 @@ def get_github_token():
     return None
 
 
-def _api(method, path, token, data=None, raw=None, ctype="application/json"):
-    url = API_BASE + path
+def _api(method, url, token, data=None, raw=None, ctype="application/json"):
     body = json.dumps(data).encode() if data is not None else raw
     req = urllib.request.Request(url, data=body, method=method)
     req.add_header("Authorization", f"token {token}")
     req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", "zapretik")
     if body is not None:
         req.add_header("Content-Type", ctype)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             return r.status, r.read().decode()
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         return -1, str(e)
 
 
 def find_release_id(tag, token):
-    st, out = _api("GET", f"/repos/{REPO_GH}/releases?per_page=100", token)
+    st, out = _api("GET", f"{API_BASE}/repos/{REPO_GH}/releases?per_page=100", token)
     if st != 200:
         return None
     try:
-        items = json.loads(out)  # GitHub returns array directly, not wrapped in "data"
+        items = json.loads(out)
     except Exception:
         return None
     for rel in items:
         if rel.get("tag_name") == tag:
             return rel.get("id")
+    return None
+
+
+def find_release_upload_url(tag, token):
+    st, out = _api("GET", f"{API_BASE}/repos/{REPO_GH}/releases?per_page=100", token)
+    if st != 200:
+        return None
+    try:
+        items = json.loads(out)
+    except Exception:
+        return None
+    for rel in items:
+        if rel.get("tag_name") == tag:
+            return rel.get("upload_url")
     return None
 
 
@@ -363,33 +206,39 @@ def create_release_api(tag, prev, desc_override=None, asset_path=None, token=Non
     desc = desc_override if desc_override is not None else (notes_for(tag) or changelog(tag, prev))
     rid = find_release_id(tag, token)
     if rid is None:
-        st, out = _api("POST", f"/repos/{REPO_GH}/releases", token,
+        st, out = _api("POST", f"{API_BASE}/repos/{REPO_GH}/releases", token,
                        data={"tag_name": tag, "name": tag, "body": desc,
                              "draft": False, "prerelease": False})
         if st not in (200, 201):
             return False, f"создание релиза {st}: {out[:300]}"
         try:
             rid = json.loads(out).get("id")
+            upload_url = json.loads(out).get("upload_url")
         except Exception:
             rid = None
+            upload_url = None
     else:
-        _api("PATCH", f"/repos/{REPO_GH}/releases/{rid}", token,
+        _api("PATCH", f"{API_BASE}/repos/{REPO_GH}/releases/{rid}", token,
              data={"body": desc, "name": tag})
+        upload_url = find_release_upload_url(tag, token)
+
     if rid and asset_path and Path(asset_path).exists():
         data = Path(asset_path).read_bytes()
         name = Path(asset_path).name
-        st, out = _api("POST",
-                       f"/repos/{REPO_GH}/releases/{rid}/assets?name={urllib.parse.quote(name)}",
-                       token, raw=data, ctype="application/octet-stream")
+        if upload_url:
+            asset_url = upload_url.replace("{?name,label}", f"?name={urllib.parse.quote(name)}")
+        else:
+            asset_url = f"{API_BASE}/repos/{REPO_GH}/releases/{rid}/assets?name={urllib.parse.quote(name)}"
+        st, out = _api("POST", asset_url, token, raw=data, ctype="application/octet-stream")
         if st not in (200, 201):
             low = (out or "").lower()
             if st != 409 and "already" not in low:
                 return False, f"загрузка ассета {st}: {out[:300]}"
-    return True, f"{BASE}/{REPO_GH}/releases/tag/{tag}"
+    return True, f"https://github.com/{REPO_GH}/releases/tag/{tag}"
 
 
 def publish_release(tag, notes=None, rar=None):
-    """Создать релиз: по API при наличии токена, иначе (или при ошибке API) — через Chrome."""
+    """Создать релиз через GitHub API."""
     tags = git_tags()
     prev = None
     for t in tags:
@@ -397,13 +246,9 @@ def publish_release(tag, notes=None, rar=None):
             break
         prev = t
     token = get_github_token()
-    if token:
-        ok, msg = create_release_api(tag, prev, desc_override=notes, asset_path=rar, token=token)
-        if ok:
-            return ok, msg
-        print(f"[!] API-релиз не вышел ({msg}), фолбэк на Chrome")
-    _, _, page = connect()
-    return create_release(page, tag, prev, desc_override=notes, asset_path=rar)
+    if not token:
+        return False, "нет GitHub токена (GITHUB_TOKEN / github_token.txt)"
+    return create_release_api(tag, prev, desc_override=notes, asset_path=rar, token=token)
 
 
 # ---------- режимы ----------
@@ -414,7 +259,7 @@ def cmd_all():
         ok, msg = publish_release(tag)
         print(f"[{'+' if ok else '='}] {tag}: {msg}")
         prev = tag
-    print("[*] готово ->", f"{BASE}/{REPO_GH}/releases")
+    print("[*] готово ->", f"https://github.com/{REPO_GH}/releases")
 
 
 def cmd_version(version, notes_file=None):
@@ -445,7 +290,7 @@ def cmd_version(version, notes_file=None):
     print("[5/5] релиз GitHub")
     ok, msg = publish_release(tag, notes, rar)
     if ok:
-        print("  релиз:", f"{BASE}/{REPO_GH}/releases/tag/{tag}")
+        print("  релиз:", f"https://github.com/{REPO_GH}/releases/tag/{tag}")
     else:
         print("  не удалось создать релиз:", msg)
 
