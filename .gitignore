@@ -224,8 +224,8 @@ WinDivert64.sys
 cygwin1.dll
 *.log
 
-# Локальный токен GitVerse (не коммитить!)
-gitverse_token.txt
+# Локальный токен GitHub (не коммитить!)
+github_token.txt
 
 # Временный профиль Chrome для релизов (копия сессии, не коммитить)
 _release_profile/

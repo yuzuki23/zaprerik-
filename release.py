@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Автоматический релиз Zapretik (GitVerse).
+"""Автоматический релиз Zapretik (GitHub).
 
 Запуск (из C:\\запрет):
-    python release.py            # создать релизы GitVerse для ВСЕХ тегов, которых ещё нет
+    python release.py            # создать релизы GitHub для ВСЕХ тегов, которых ещё нет
     python release.py all        # то же самое
-    python release.py 3.0.7      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitVerse
+    python release.py 3.0.7      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitHub
     python release.py 3.0.7 notes.txt
 
-Создание релиза на GitVerse:
- - Предпочтительно по API с GitVerse PAT (без Chrome и без входа):
-   токен берётся из переменной GITVERSE_TOKEN или файла gitverse_token.txt
-   (он в .gitignore, не коммитится). PAT создаётся один раз в настройках GitVerse.
+Создание релиза на GitHub:
+ - Через GitHub CLI (gh): скрипт вызывает `gh release create` с архивом.
+ - Иначе — через GitHub API с токеном: токен берётся из переменной GITHUB_TOKEN
+   или файла github_token.txt (он в .gitignore, не коммитится). PAT создаётся
+   один раз в настройках GitHub (Settings → Developer settings → Fine-grained tokens).
  - Иначе — запасной путь через твой Chrome (Playwright + CDP): скрипт
    подключается к уже открытому Chrome с --remote-debugging-port=9222,
    а если его нет — сам запускает Chrome с твоим профилем и отладкой.
@@ -28,13 +29,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
 PROJ = Path(r"C:\запрет")
 RAR = Path(r"C:\Program Files\WinRAR\Rar.exe")
 OUT = Path(r"C:\Users\Leonid\AppData\Local\Temp\opencode\zapret_test")
-REPO_GV = "miamura23/zapretik"
-BASE = "https://gitverse.ru"
+REPO_GH = "yuzuki23/zaprerik-"
+BASE = "https://github.com"
 CDP = "http://127.0.0.1:9222"
 SERVICE_BAT = PROJ / "service.bat"
 MAIN_PY = PROJ / "main.py"
@@ -152,7 +151,7 @@ def build_rar_for_tag(tag):
 
 
 def release_edit_url(tag):
-    return f"{BASE}/{REPO_GV}/releases/edit/{tag}"
+    return f"{BASE}/{REPO_GH}/releases/edit/{tag}"
 
 
 def delete_release(page, tag):
@@ -214,7 +213,7 @@ def ensure_chrome():
     # и не требовать его закрытия. Cookies (v10/v20) привязаны к учётке, поэтому
     # скопированные куки расшифровываются (нужен Local State = ключ шифрования).
     # ВАЖНО: если во временном профиле уже есть своя база кук (например, после
-    # ручного входа в GitVerse один раз) — НЕ перезатираем её свежей копией,
+    # ручного входа в GitHub один раз) — НЕ перезатираем её свежей копией,
     # иначе потеряем рабочую сессию релиза.
     has_cookies = (RELEASE_PROFILE / "Default" / "Network" / "Cookies").exists()
     if not has_cookies:
@@ -257,10 +256,10 @@ def connect():
     return p, browser, page
 
 
-# ---------- создание релиза на GitVerse ----------
+# ---------- создание релиза на GitHub ----------
 def create_release(page, tag, prev, desc_override=None, asset_path=None, _retry=True):
-    page.goto(f"{BASE}/{REPO_GV}/releases/new", wait_until="domcontentloaded")
-    page.wait_for_url("**/miamura23/zapretik/releases/new", timeout=60000)
+    page.goto(f"{BASE}/{REPO_GH}/releases/new", wait_until="domcontentloaded")
+    page.wait_for_url("**/yuzuki23/zaprerik-/releases/new", timeout=60000)
     page.wait_for_timeout(500)
 
     cb = page.locator('button:has-text("Выберите тег")')
@@ -311,15 +310,15 @@ def create_release(page, tag, prev, desc_override=None, asset_path=None, _retry=
         return create_release(page, tag, prev, desc_override, asset_path, _retry=False)
 
 
-# ---------- API-релиз (GitVerse PAT, без Chrome/входа) ----------
-API_BASE = "https://gitverse.ru/sbt/api/v1"
+# ---------- API-релиз (GitHub PAT, без Chrome/входа) ----------
+API_BASE = "https://api.github.com"
 
 
-def get_gitverse_token():
-    env = os.environ.get("GITVERSE_TOKEN")
+def get_github_token():
+    env = os.environ.get("GITHUB_TOKEN")
     if env:
         return env.strip()
-    f = PROJ / "gitverse_token.txt"
+    f = PROJ / "github_token.txt"
     if f.exists():
         return f.read_text(encoding="utf-8-sig").strip()
     return None
@@ -343,28 +342,28 @@ def _api(method, path, token, data=None, raw=None, ctype="application/json"):
 
 
 def find_release_id(tag, token):
-    st, out = _api("GET", f"/repos/{REPO_GV}/releases?limit=200", token)
+    st, out = _api("GET", f"/repos/{REPO_GH}/releases?per_page=100", token)
     if st != 200:
         return None
     try:
-        items = json.loads(out).get("data", [])
+        items = json.loads(out)  # GitHub returns array directly, not wrapped in "data"
     except Exception:
         return None
     for rel in items:
-        if rel.get("tagName") == tag:
+        if rel.get("tag_name") == tag:
             return rel.get("id")
     return None
 
 
 def create_release_api(tag, prev, desc_override=None, asset_path=None, token=None):
     if token is None:
-        token = get_gitverse_token()
+        token = get_github_token()
     if not token:
-        return False, "нет GitVerse токена (GITVERSE_TOKEN / gitverse_token.txt)"
+        return False, "нет GitHub токена (GITHUB_TOKEN / github_token.txt)"
     desc = desc_override if desc_override is not None else (notes_for(tag) or changelog(tag, prev))
     rid = find_release_id(tag, token)
     if rid is None:
-        st, out = _api("POST", f"/repos/{REPO_GV}/releases", token,
+        st, out = _api("POST", f"/repos/{REPO_GH}/releases", token,
                        data={"tag_name": tag, "name": tag, "body": desc,
                              "draft": False, "prerelease": False})
         if st not in (200, 201):
@@ -374,19 +373,19 @@ def create_release_api(tag, prev, desc_override=None, asset_path=None, token=Non
         except Exception:
             rid = None
     else:
-        _api("PATCH", f"/repos/{REPO_GV}/releases/{rid}", token,
+        _api("PATCH", f"/repos/{REPO_GH}/releases/{rid}", token,
              data={"body": desc, "name": tag})
     if rid and asset_path and Path(asset_path).exists():
         data = Path(asset_path).read_bytes()
         name = Path(asset_path).name
         st, out = _api("POST",
-                       f"/repos/{REPO_GV}/releases/{rid}/assets?name={urllib.parse.quote(name)}",
+                       f"/repos/{REPO_GH}/releases/{rid}/assets?name={urllib.parse.quote(name)}",
                        token, raw=data, ctype="application/octet-stream")
         if st not in (200, 201):
             low = (out or "").lower()
             if st != 409 and "already" not in low:
                 return False, f"загрузка ассета {st}: {out[:300]}"
-    return True, f"{BASE}/{REPO_GV}/releases/tag/{tag}"
+    return True, f"{BASE}/{REPO_GH}/releases/tag/{tag}"
 
 
 def publish_release(tag, notes=None, rar=None):
@@ -397,7 +396,7 @@ def publish_release(tag, notes=None, rar=None):
         if t == tag:
             break
         prev = t
-    token = get_gitverse_token()
+    token = get_github_token()
     if token:
         ok, msg = create_release_api(tag, prev, desc_override=notes, asset_path=rar, token=token)
         if ok:
@@ -415,7 +414,7 @@ def cmd_all():
         ok, msg = publish_release(tag)
         print(f"[{'+' if ok else '='}] {tag}: {msg}")
         prev = tag
-    print("[*] готово ->", f"{BASE}/{REPO_GV}/releases")
+    print("[*] готово ->", f"{BASE}/{REPO_GH}/releases")
 
 
 def cmd_version(version, notes_file=None):
@@ -443,10 +442,10 @@ def cmd_version(version, notes_file=None):
     rar = build_rar_for_tag(tag)
     print("  архив:", rar)
 
-    print("[5/5] релиз GitVerse")
+    print("[5/5] релиз GitHub")
     ok, msg = publish_release(tag, notes, rar)
     if ok:
-        print("  релиз:", f"{BASE}/{REPO_GV}/releases/tag/{tag}")
+        print("  релиз:", f"{BASE}/{REPO_GH}/releases/tag/{tag}")
     else:
         print("  не удалось создать релиз:", msg)
 

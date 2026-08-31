@@ -5,11 +5,11 @@ import urllib.request
 
 import release
 
-API = "https://gitverse.ru/sbt/api/v1/repos/miamura23/zapretik/releases"
+API = "https://api.github.com/repos/yuzuki23/zaprerik-/releases"
 
 
 def get_releases():
-    req = urllib.request.Request(API, headers={"Accept": "application/json"})
+    req = urllib.request.Request(API, headers={"Accept": "application/json", "User-Agent": "zapretik"})
     return json.load(urllib.request.urlopen(req, timeout=30))
 
 
@@ -37,9 +37,9 @@ def attach_via_edit(page, tag, rar):
 
 def has_attachment(tag, fname):
     rels = get_releases()
-    for r in rels["data"]:
-        if r["tagName"] == tag:
-            for a in (r.get("attachments") or []):
+    for r in rels:  # GitHub returns array directly
+        if r["tag_name"] == tag:
+            for a in (r.get("assets") or []):
                 if a.get("name") == fname:
                     return True
     return False
@@ -52,7 +52,7 @@ def main():
     if ONLY:
         tags = [t for t in tags if t == ONLY]
     rels = get_releases()
-    by_tag = {r["tagName"]: r for r in rels["data"]}
+    by_tag = {r["tag_name"]: r for r in rels}  # GitHub uses tag_name
     prev = None
     for tag in tags:
         rar = release.build_rar_for_tag(tag)
