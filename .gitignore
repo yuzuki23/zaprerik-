@@ -227,5 +227,6 @@ cygwin1.dll
 # Локальный токен GitHub (не коммитить!)
 github_token.txt
 
-# Временный профиль Chrome для релизов (копия сессии, не коммитить)
-_release_profile/
+# Рабочие файлы (не коммитить!)
+care_sent.txt
+discord_status.txt
