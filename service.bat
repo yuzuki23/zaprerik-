@@ -1,5 +1,5 @@
 @echo off
-set "LOCAL_VERSION=4.0.3"
+set "LOCAL_VERSION=4.0.4"
 
 :: Проверка наличия Python
 where python >nul 2>nul

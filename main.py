@@ -99,7 +99,7 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/4.0.3 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/4.0.4 (Windows wrapper for bol-van/zapret)"
 
 
 def get_version() -> str:
