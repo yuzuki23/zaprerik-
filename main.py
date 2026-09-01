@@ -99,7 +99,13 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/4.0.2 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/4.0.3 (Windows wrapper for bol-van/zapret)"
+
+
+def get_version() -> str:
+    """Возвращает текущую версию из GITHUB_UA."""
+    return GITHUB_UA.split("/")[1].split(" ")[0]
+
 
 # Маркеры ошибок, по которым строки вывода winws.exe красятся в красный цвет.
 ERROR_MARKERS: Tuple[str, ...] = (
@@ -714,6 +720,7 @@ def show_menu() -> None:
         table.add_row(f"[{strat.color}]{key}.[/]", f"[{strat.color}]{strat.name}[/]")
         table.add_row("", f"[dim]       {strat.description}[/]")
     table.add_row("[red]4.[/]", "[red]Остановить сервис[/]")
+    table.add_row("[cyan]5.[/]", "[cyan]Текущая версия[/]")
     table.add_row("[red]0.[/]", "[red]Выход[/]")
 
     get_console().print(table)
@@ -781,6 +788,10 @@ def main() -> int:
                 break
             if choice == "4":             # остановить сервис
                 stop_winws()
+                continue
+            if choice == "5":             # текущая версия
+                ver = get_version()
+                get_console().print(f"[cyan]Текущая версия: {ver}[/]")
                 continue
             if choice in ("1", "2", "3"): # запуск стратегии
                 run_strategy(STRATEGIES[int(choice)])

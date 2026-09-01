@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 
 os.system("")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_DIR = Path(r"C:\запрет")
 WATCHDOG_LOG = BASE_DIR / "watchdog.log"

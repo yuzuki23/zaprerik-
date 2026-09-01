@@ -1,5 +1,14 @@
 @echo off
-set "LOCAL_VERSION=4.0.2"
+set "LOCAL_VERSION=4.0.3"
+
+:: Проверка наличия Python
+where python >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Python не найден! Установите Python 3.8+ и добавьте в PATH.
+    echo Скачать: https://www.python.org/downloads/
+    pause
+    exit /b 1
+)
 
 :: External commands
 if "%~1"=="status_zapret" (
