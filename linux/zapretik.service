@@ -1,0 +1,14 @@
+[Unit]
+Description=Zapretik — DPI bypass for Discord/YouTube (nfqws)
+Documentation=https://github.com/yuzuki23/zaprerik-
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/zapretik/zapretik.sh start
+ExecStop=/opt/zapretik/zapretik.sh stop
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
