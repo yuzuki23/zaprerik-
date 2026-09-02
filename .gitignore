@@ -231,3 +231,6 @@ gitverse_token.txt
 # Рабочие файлы (не коммитить!)
 care_sent.txt
 discord_status.txt
+
+# Сессия Playwright (не коммитить!)
+.gitverse_session/
