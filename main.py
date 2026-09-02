@@ -51,6 +51,7 @@ import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -99,7 +100,7 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/4.0.5 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/4.0.6 (Windows wrapper for bol-van/zapret)"
 
 
 def get_version() -> str:
@@ -242,8 +243,8 @@ def setup_logging() -> logging.Logger:
     logger.handlers.clear()
     logger.propagate = False
 
-    # 1) Файловый обработчик — вся информация в UTF-8.
-    file_handler = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
+    # 1) Файловый обработчик — вся информация в UTF-8, ротация при 5 Мб (3 бэкапа).
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
