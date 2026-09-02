@@ -10,7 +10,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-os.system("")
+try:
+    os.system("")
+except Exception:
+    pass
 
 _MORNING = [
     "Доброе утро, коть! Как спалось? Завтракать не забудь) Я рядом, если что.",

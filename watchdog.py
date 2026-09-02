@@ -18,9 +18,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-os.system("")
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+try:
+    os.system("")
+except Exception:
+    pass
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+try:
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 BASE_DIR = Path(r"C:\запрет")
 WATCHDOG_LOG = BASE_DIR / "watchdog.log"
@@ -115,7 +124,10 @@ def rotate(path: Path, max_size=MAX_LOG_SIZE, keep=KEEP_LOGS):
 
 def log(msg):
     line = f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}"
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except Exception:
+        pass
     with WATCHDOG_LOG.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
