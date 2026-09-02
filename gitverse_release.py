@@ -107,14 +107,11 @@ def create_release(version):
             desc = (
                 f"## Zapretik {version}\n\n"
                 f"### Что нового:\n"
-                f"- Linux обёртка для nfqws (Arch Linux)\n"
-                f"- ZapretikWatchdog: BootTrigger + LogonTrigger, работает от батареи\n"
-                f"- watchdog.py: исправлен падения в pythonw\n"
-                f"- service.bat: проверка Python при старте\n"
-                f"- main.py: пункт «Текущая версия» в меню\n\n"
+                f"- general.bat: проверка запущен ли уже winws перед стартом\n"
+                f"- gitverse_release.py: проверка размера файла (<100 Мб)\n"
+                f"- watchdog.py: логирование при падении всех процессов одновременно\n\n"
                 f"### Файлы:\n"
-                f"- zaprerik-{tag}.rar — Windows\n"
-                f"- zapretik-linux-{tag}.tar.gz — Linux"
+                f"- zaprerik-{tag}.rar — Windows"
             )
             editor = page.locator('[contenteditable="true"]').first
             editor.click()
