@@ -102,10 +102,32 @@ BUNDLE_ZIP_URL: str = (
 GITHUB_API: str = "https://api.github.com"
 GITHUB_UA: str = "Zapretik/4.0.6 (Windows wrapper for bol-van/zapret)"
 
+GITVERSE_REPO: str = "miamura23/zapretik"
+GITVERSE_API: str = "https://gitverse.ru/api/v1"
+
 
 def get_version() -> str:
     """Возвращает текущую версию из GITHUB_UA."""
     return GITHUB_UA.split("/")[1].split(" ")[0]
+
+
+def check_gitverse_updates() -> Optional[str]:
+    """Проверяет последний релиз на GitVerse и возвращает версию, если есть обновление."""
+    try:
+        url = f"{GITVERSE_API}/repos/{GITVERSE_REPO}/releases/latest"
+        resp = requests.get(url, timeout=15, headers={"User-Agent": GITHUB_UA})
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        tag = data.get("tag_name", "")
+        if tag.startswith("v"):
+            tag = tag[1:]
+        current = get_version()
+        if tag and tag != current:
+            return tag
+    except Exception:
+        pass
+    return None
 
 
 # Маркеры ошибок, по которым строки вывода winws.exe красятся в красный цвет.
@@ -697,12 +719,19 @@ def run_strategy(strategy: Strategy) -> None:
 # ==============================================================================
 
 def show_banner() -> None:
-    """Печатает стартовый баннер утилиты."""
+    """Печатает стартовый баннер утилиты и проверяет обновления."""
+    ver = get_version()
+    update_info = ""
+    new_ver = check_gitverse_updates()
+    if new_ver:
+        update_info = f"\n[yellow]Доступна новая версия: v{new_ver}![/]"
     get_console().print(
         Panel.fit(
             Text.assemble(
                 ("ZAPRETIK", "bold cyan"),
+                (f"  v{ver}", "cyan"),
                 ("  — обход DPI для Discord и YouTube", "white"),
+                (update_info, ""),
             ),
             border_style="cyan",
             subtitle="обёртка над winws.exe (bol-van/zapret)",
@@ -811,5 +840,19 @@ def main() -> int:
     return 0
 
 
+def main_with_restart(max_restarts: int = 3) -> int:
+    """Запускает main() с автоперезапуском при падении (до max_restarts попыток)."""
+    import time
+    for attempt in range(max_restarts):
+        code = main()
+        if code == 0:
+            return code
+        if attempt < max_restarts - 1:
+            logger.warning("Процесс завершился с кодом %d. Перезапуск (%d/%d)...",
+                           code, attempt + 2, max_restarts)
+            time.sleep(2)
+    return code
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main_with_restart())
