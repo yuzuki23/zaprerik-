@@ -526,7 +526,7 @@ def _run():
         entry["down_since"] = None
         time.sleep(1)
 
-    write_status("running", {"processes": {e["name"]: e.get("proc", {} and e["proc"].pid if e.get("proc") else None) for e in WATCHED}})
+    write_status("running", {"processes": {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}})
     cycle = 0
 
     while True:
