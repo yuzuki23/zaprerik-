@@ -501,6 +501,21 @@ def _run():
                         except Exception:
                             pass
 
+        # Проверка: если все 3 процесса умерли одновременно — логируем причину
+        all_dead = all(
+            e.get("proc") is not None and e["proc"].poll() is not None
+            for e in WATCHED
+        )
+        if all_dead:
+            log("КРИТИЧНО: все процессы (care, monitor, watchdog) упали одновременно!")
+            log("Возможные причины: нехватка памяти, crash Python, убийство антивирусом")
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                log(f"Память: {mem.percent}% занято ({mem.available // (1024*1024)} Мб свободно)")
+            except Exception:
+                pass
+
         # Надзор за winws
         if not winws_up():
             # winws упал/остановлен. Прежде чем поднимать — выясняем ПОЧЕМУ:

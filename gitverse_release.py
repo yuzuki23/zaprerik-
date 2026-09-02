@@ -28,6 +28,12 @@ def build_rar(version):
          "-x*.log", str(rar), "*"],
         capture_output=True, text=True, timeout=300, cwd=str(PROJ)
     )
+    if not rar.exists():
+        raise RuntimeError(f"RAR не создан: {rar}")
+    size_mb = rar.stat().st_size / (1024 * 1024)
+    if size_mb > 100:
+        raise RuntimeError(f"Файл слишком большой: {size_mb:.1f} Мб (лимит GitVerse: 100 Мб)")
+    print(f"  Размер: {size_mb:.1f} Мб")
     return rar
 
 
