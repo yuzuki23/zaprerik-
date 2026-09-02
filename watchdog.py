@@ -11,6 +11,7 @@
 По умолчанию процессы запускаются с CREATE_NO_WINDOW и работают фоном.
 """
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -32,35 +33,85 @@ except Exception:
     pass
 
 BASE_DIR = Path(r"C:\запрет")
+CONFIG_FILE = BASE_DIR / "config.json"
 WATCHDOG_LOG = BASE_DIR / "watchdog.log"
+STATUS_FILE = BASE_DIR / "status.json"
 PYTHON = Path(sys.executable)
 WINWS = BASE_DIR / "bin" / "winws.exe"
 HASH_FILE = BASE_DIR / "winws.sha256"
-MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 МБ
-KEEP_LOGS = 3
+NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
+
+# Загрузка конфига
+def load_config():
+    defaults = {
+        "version": "4.0.7",
+        "watchdog": {
+            "daily_restart_hour": 4,
+            "liveness_timeout_sec": 360,
+            "cycle_sleep_sec": 10,
+            "memory_check_interval": 60,
+            "max_log_lines": 2000,
+            "keep_log_lines": 500,
+        },
+        "winws": {
+            "restart_delay_sec": 45,
+            "verification_attempts": 10,
+            "verification_sleep_sec": 2,
+        },
+        "logs": {
+            "rotate_by_date": True,
+            "max_size_mb": 5,
+            "backup_count": 3,
+        },
+    }
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                user = json.load(f)
+            for k, v in user.items():
+                if isinstance(v, dict) and k in defaults:
+                    defaults[k].update(v)
+                else:
+                    defaults[k] = v
+        except Exception:
+            pass
+    return defaults
+
+CFG = load_config()
+
+# Конфиг -> переменные
+DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
+LIVENESS_TIMEOUT = CFG["watchdog"]["liveness_timeout_sec"]
+CYCLE_SLEEP = CFG["watchdog"]["cycle_sleep_sec"]
+MEMORY_CHECK_INTERVAL = CFG["watchdog"]["memory_check_interval"]
+MAX_LOG_LINES = CFG["watchdog"]["max_log_lines"]
+KEEP_LOG_LINES = CFG["watchdog"]["keep_log_lines"]
+RESTART_DELAY = CFG["winws"]["restart_delay_sec"]
+VERIFY_ATTEMPTS = CFG["winws"]["verification_attempts"]
+VERIFY_SLEEP = CFG["winws"]["verification_sleep_sec"]
+ROTATE_BY_DATE = CFG["logs"]["rotate_by_date"]
 
 # Самоперезапуск сторожа при изменении его собственного кода.
 WATCHDOG_SELF = BASE_DIR / "watchdog.py"
 WATCHDOG_SELF_MTIME = WATCHDOG_SELF.stat().st_mtime
 
 # Процессы под надзором: имя -> (скрипт, аргументы, частота перезапуска при сбое)
-# monitor.py без аргументов = интервал 120 секунд (по умолчанию)
 WATCHED = [
     {"name": "care",     "script": "care.py",     "args": []},
     {"name": "monitor",  "script": "monitor.py",  "args": []},
 ]
 
-NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
-
-# Heartbeat-живость моника: если процесс жив, но не пишет в лог/статус дольше
-# LIVENESS_TIMEOUT секунд — считаем его зависшим и принудительно перезапускаем.
-# Иначе сторож не видит Hang (видит только падение, через proc.poll()).
+# Heartbeat-живость моника
 MONITOR_LOG = BASE_DIR / "discord_monitor.log"
-LIVENESS_TIMEOUT = 360  # 6 минут
 
 # Singleton: не даём запуститься второму экземпляру watchdog
-# (чтобы при запуске через Планировщик заданий не задублировались care/monitor).
 LOCK_FILE = Path(os.environ.get("TEMP", str(BASE_DIR))) / "zapretik_watchdog.lock"
+
+# Глобальное состояние winws (вынесено до main)
+entry_up = {"last_down": None}
+winws_state = {"pid": None, "since": None}
+daily_restart_done_day = None
+planned_restart = set()
 
 
 def acquire_lock():
@@ -108,7 +159,7 @@ def is_admin():
         return False
 
 
-def rotate(path: Path, max_size=MAX_LOG_SIZE, keep=KEEP_LOGS):
+def rotate(path: Path, max_size=5*1024*1024, keep=3):
     """Если лог разросся — сдвигает копии (.1, .2, ...) и начинает новый."""
     if not path.exists() or path.stat().st_size < max_size:
         return
@@ -130,6 +181,22 @@ def log(msg):
         pass
     with WATCHDOG_LOG.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+def write_status(status, details=None):
+    """Записывает JSON-статус в status.json для внешних программ."""
+    data = {
+        "version": CFG.get("version", "4.0.7"),
+        "timestamp": datetime.now().isoformat(),
+        "status": status,
+    }
+    if details:
+        data.update(details)
+    try:
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def start_proc(entry):
@@ -282,10 +349,10 @@ def start_zapret():
         return False
     # Верификация: winws реально RUNNING? sc start может вернуть успех, но служба
     # ещё в START_PENDING или упала сразу — опрашиваем STATE до ~20 секунд.
-    for _ in range(10):
+    for _ in range(VERIFY_ATTEMPTS):
         if winws_up():
             return True
-        time.sleep(2)
+        time.sleep(VERIFY_SLEEP)
     # Фолбэк: net start (иногда sc start не поднимает из-за гонки WinDivert/драйвера)
     log("winws не поднялся через sc start — пробуем net start zapret")
     try:
@@ -293,10 +360,10 @@ def start_zapret():
                        timeout=30, creationflags=NO_WINDOW)
     except Exception as exc:
         log(f"ОШИБКА net start: {exc}")
-    for _ in range(10):
+    for _ in range(VERIFY_ATTEMPTS):
         if winws_up():
             return True
-        time.sleep(2)
+        time.sleep(VERIFY_SLEEP)
     log("winws НЕ поднялся после всех попыток (вероятен краш winws.exe)")
     return False
 
@@ -304,7 +371,6 @@ def start_zapret():
 # Ежедневный перезапуск сторожа в заданный час, чтобы правки кода
 # (watchdog.py / monitor.py / care.py) подхватывались без ручного .bat.
 # Службу zapret не трогаем — Discord не дёргаем понапрасну.
-DAILY_RESTART_HOUR = 4
 daily_restart_done_day = None
 planned_restart = set()
 
@@ -451,7 +517,8 @@ def kill_stray_scripts():
 def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
-    log("Watchdog запущен. Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '4.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
     for entry in WATCHED:
@@ -459,6 +526,7 @@ def _run():
         entry["down_since"] = None
         time.sleep(1)
 
+    write_status("running", {"processes": {e["name"]: e.get("proc", {} and e["proc"].pid if e.get("proc") else None) for e in WATCHED}})
     cycle = 0
 
     while True:
@@ -537,7 +605,7 @@ def _run():
                     new_pid = winws_pid()
                     log(f"winws поднят (авто-восстановление, новый PID {new_pid})")
                 else:
-                    log("winws НЕ поднялся — повторная попытка через 45с")
+                    log(f"winws НЕ поднялся — повторная попытка через {RESTART_DELAY}с")
                 entry_up["last_down"] = now
                 winws_state["pid"] = winws_pid()
                 winws_state["since"] = time.time()
@@ -558,16 +626,12 @@ def _run():
                 # состояние, даём следующему циклу разобраться.
                 winws_state["pid"] = None
                 winws_state["since"] = None
-        time.sleep(10)
+        time.sleep(CYCLE_SLEEP)
         cycle += 1
-        # Каждые ~10 минут (60 циклов * 10 сек) — логируем память winws
-        if cycle % 60 == 0:
+        # Каждые N циклов — логируем память winws
+        if cycle % MEMORY_CHECK_INTERVAL == 0:
             log_winws_memory()
             rotate_by_lines(WATCHDOG_LOG)
-
-
-entry_up = {"last_down": None}
-winws_state = {"pid": None, "since": None}
 
 
 if __name__ == "__main__":
