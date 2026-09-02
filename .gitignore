@@ -224,8 +224,9 @@ WinDivert64.sys
 cygwin1.dll
 *.log
 
-# Локальный токен GitHub (не коммитить!)
+# Локальные токены (не коммитить!)
 github_token.txt
+gitverse_token.txt
 
 # Рабочие файлы (не коммитить!)
 care_sent.txt

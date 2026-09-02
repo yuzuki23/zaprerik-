@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Автоматический релиз Zapretik (GitHub API).
+"""Автоматический релиз Zapretik (GitVerse API).
 
 Запуск (из C:\\запрет):
-    python release.py            # создать релизы GitHub для ВСЕХ тегов, которых ещё нет
+    python release.py            # создать релизы GitVerse для ВСЕХ тегов, которых ещё нет
     python release.py all        # то же самое
-    python release.py 4.0.2      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitHub
+    python release.py 4.0.2      # полный релиз версии: bump -> commit -> push -> tag -> RAR -> релиз GitVerse
     python release.py 4.0.2 notes.txt
 
-Создание релиза на GitHub:
- - Через GitHub REST API с токеном: токен берётся из переменной GITHUB_TOKEN
-   или файла github_token.txt (в .gitignore, не коммитится).
+Создание релиза на GitVerse:
+ - Через GitVerse REST API с токеном: токен берётся из переменной GITVERSE_TOKEN
+   или файла gitverse_token.txt (в .gitignore, не коммитится).
 """
 import json
 import os
@@ -26,8 +26,8 @@ from pathlib import Path
 PROJ = Path(r"C:\запрет")
 RAR = Path(r"C:\Program Files\WinRAR\Rar.exe")
 OUT = Path(r"C:\Users\Leonid\AppData\Local\Temp\opencode\zapret_test")
-REPO_GH = "yuzuki23/zaprerik-"
-API_BASE = "https://api.github.com"
+REPO_GV = "miamura23/zapretik"
+API_BASE = "https://gitverse.ru/api/v1"
 SERVICE_BAT = PROJ / "service.bat"
 MAIN_PY = PROJ / "main.py"
 RETRIES = 12
@@ -142,12 +142,12 @@ def build_rar_for_tag(tag):
     return rar
 
 
-# ---------- GitHub API ----------
-def get_github_token():
-    env = os.environ.get("GITHUB_TOKEN")
+# ---------- GitVerse API ----------
+def get_gitverse_token():
+    env = os.environ.get("GITVERSE_TOKEN")
     if env:
         return env.strip()
-    f = PROJ / "github_token.txt"
+    f = PROJ / "gitverse_token.txt"
     if f.exists():
         return f.read_text(encoding="utf-8-sig").strip()
     return None
@@ -171,7 +171,7 @@ def _api(method, url, token, data=None, raw=None, ctype="application/json"):
 
 
 def find_release_id(tag, token):
-    st, out = _api("GET", f"{API_BASE}/repos/{REPO_GH}/releases?per_page=100", token)
+    st, out = _api("GET", f"{API_BASE}/repos/{REPO_GV}/releases?limit=50", token)
     if st != 200:
         return None
     try:
@@ -185,7 +185,7 @@ def find_release_id(tag, token):
 
 
 def find_release_upload_url(tag, token):
-    st, out = _api("GET", f"{API_BASE}/repos/{REPO_GH}/releases?per_page=100", token)
+    st, out = _api("GET", f"{API_BASE}/repos/{REPO_GV}/releases?limit=50", token)
     if st != 200:
         return None
     try:
@@ -200,13 +200,13 @@ def find_release_upload_url(tag, token):
 
 def create_release_api(tag, prev, desc_override=None, asset_path=None, token=None):
     if token is None:
-        token = get_github_token()
+        token = get_gitverse_token()
     if not token:
-        return False, "нет GitHub токена (GITHUB_TOKEN / github_token.txt)"
+        return False, "нет GitVerse токена (GITVERSE_TOKEN / gitverse_token.txt)"
     desc = desc_override if desc_override is not None else (notes_for(tag) or changelog(tag, prev))
     rid = find_release_id(tag, token)
     if rid is None:
-        st, out = _api("POST", f"{API_BASE}/repos/{REPO_GH}/releases", token,
+        st, out = _api("POST", f"{API_BASE}/repos/{REPO_GV}/releases", token,
                        data={"tag_name": tag, "name": tag, "body": desc,
                              "draft": False, "prerelease": False})
         if st not in (200, 201):
@@ -218,7 +218,7 @@ def create_release_api(tag, prev, desc_override=None, asset_path=None, token=Non
             rid = None
             upload_url = None
     else:
-        _api("PATCH", f"{API_BASE}/repos/{REPO_GH}/releases/{rid}", token,
+        _api("PATCH", f"{API_BASE}/repos/{REPO_GV}/releases/{rid}", token,
              data={"body": desc, "name": tag})
         upload_url = find_release_upload_url(tag, token)
 
@@ -228,26 +228,26 @@ def create_release_api(tag, prev, desc_override=None, asset_path=None, token=Non
         if upload_url:
             asset_url = upload_url.replace("{?name,label}", f"?name={urllib.parse.quote(name)}")
         else:
-            asset_url = f"{API_BASE}/repos/{REPO_GH}/releases/{rid}/assets?name={urllib.parse.quote(name)}"
+            asset_url = f"{API_BASE}/repos/{REPO_GV}/releases/{rid}/assets?name={urllib.parse.quote(name)}"
         st, out = _api("POST", asset_url, token, raw=data, ctype="application/octet-stream")
         if st not in (200, 201):
             low = (out or "").lower()
             if st != 409 and "already" not in low:
                 return False, f"загрузка ассета {st}: {out[:300]}"
-    return True, f"https://github.com/{REPO_GH}/releases/tag/{tag}"
+    return True, f"https://gitverse.ru/{REPO_GV}/releases/tag/{tag}"
 
 
 def publish_release(tag, notes=None, rar=None):
-    """Создать релиз через GitHub API."""
+    """Создать релиз через GitVerse API."""
     tags = git_tags()
     prev = None
     for t in tags:
         if t == tag:
             break
         prev = t
-    token = get_github_token()
+    token = get_gitverse_token()
     if not token:
-        return False, "нет GitHub токена (GITHUB_TOKEN / github_token.txt)"
+        return False, "нет GitVerse токена (GITVERSE_TOKEN / gitverse_token.txt)"
     return create_release_api(tag, prev, desc_override=notes, asset_path=rar, token=token)
 
 
@@ -259,7 +259,7 @@ def cmd_all():
         ok, msg = publish_release(tag)
         print(f"[{'+' if ok else '='}] {tag}: {msg}")
         prev = tag
-    print("[*] готово ->", f"https://github.com/{REPO_GH}/releases")
+    print("[*] готово ->", f"https://gitverse.ru/{REPO_GV}/releases")
 
 
 def cmd_version(version, notes_file=None):
@@ -287,10 +287,10 @@ def cmd_version(version, notes_file=None):
     rar = build_rar_for_tag(tag)
     print("  архив:", rar)
 
-    print("[5/5] релиз GitHub")
+    print("[5/5] релиз GitVerse")
     ok, msg = publish_release(tag, notes, rar)
     if ok:
-        print("  релиз:", f"https://github.com/{REPO_GH}/releases/tag/{tag}")
+        print("  релиз:", f"https://gitverse.ru/{REPO_GV}/releases/tag/{tag}")
     else:
         print("  не удалось создать релиз:", msg)
 
