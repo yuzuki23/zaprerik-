@@ -44,7 +44,7 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "4.0.8",
+        "version": "4.0.9",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,

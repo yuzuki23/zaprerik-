@@ -100,7 +100,7 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/4.0.8 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/4.0.9 (Windows wrapper for bol-van/zapret)"
 
 GITVERSE_REPO: str = "miamura23/zapretik"
 GITVERSE_API: str = "https://gitverse.ru/api/v1"
