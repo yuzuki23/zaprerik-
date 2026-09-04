@@ -44,7 +44,7 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "4.0.7",
+        "version": "4.0.8",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -68,13 +68,22 @@ def load_config():
         try:
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 user = json.load(f)
+            if not isinstance(user, dict):
+                raise ValueError("config.json — не JSON-объект")
             for k, v in user.items():
                 if isinstance(v, dict) and k in defaults:
+                    for sk, sv in v.items():
+                        if sk in defaults[k] and type(defaults[k][sk]) == type(sv):
+                            defaults[k][sk] = sv
+                        elif sk in defaults[k]:
+                            pass
                     defaults[k].update(v)
                 else:
                     defaults[k] = v
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            print(f"[WARN] config.json повреждён ({e}) — используются настройки по умолчанию")
+        except Exception as e:
+            print(f"[WARN] Ошибка чтения config.json: {e} — используются настройки по умолчанию")
     return defaults
 
 CFG = load_config()

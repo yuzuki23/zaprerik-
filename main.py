@@ -100,7 +100,7 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/4.0.7 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/4.0.8 (Windows wrapper for bol-van/zapret)"
 
 GITVERSE_REPO: str = "miamura23/zapretik"
 GITVERSE_API: str = "https://gitverse.ru/api/v1"
@@ -128,6 +128,57 @@ def check_gitverse_updates() -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def download_update(new_version: str) -> bool:
+    """Скачивает и распаковывает обновление с GitVerse."""
+    tag = f"v{new_version}"
+    try:
+        url = f"{GITVERSE_API}/repos/{GITVERSE_REPO}/releases/tags/{tag}"
+        resp = requests.get(url, timeout=15, headers={"User-Agent": GITHUB_UA})
+        if resp.status_code != 200:
+            logger.error("Не удалось получить информацию о релизе %s", tag)
+            return False
+        data = resp.json()
+        assets = data.get("assets", [])
+        rar_asset = None
+        for asset in assets:
+            if asset.get("name", "").endswith(".rar"):
+                rar_asset = asset
+                break
+        if not rar_asset:
+            logger.error("В релизе %s не найден .rar файл", tag)
+            return False
+        download_url = rar_asset.get("browser_download_url")
+        if not download_url:
+            logger.error("Не удалось получить ссылку на скачивание")
+            return False
+        get_console().print(
+            Panel.fit(f"[bold cyan]Скачивание обновления {tag}...[/]", border_style="cyan")
+        )
+        rar_path = BASE_DIR / f"zapretik_update_{tag}.rar"
+        if download_file(download_url, rar_path, f"Обновление {tag}"):
+            import subprocess
+            rar_exe = Path(r"C:\Program Files\WinRAR\Rar.exe")
+            if rar_exe.exists():
+                subprocess.run(
+                    [str(rar_exe), "x", "-o+", "-y", str(rar_path), str(BASE_DIR)],
+                    capture_output=True, timeout=120
+                )
+            else:
+                import zipfile
+                try:
+                    with zipfile.ZipFile(rar_path) as zf:
+                        zf.extractall(BASE_DIR)
+                except Exception:
+                    logger.warning("Не удалось распаковать %s (не ZIP и нет WinRAR)", rar_path.name)
+                    return False
+            rar_path.unlink(missing_ok=True)
+            get_console().print(f"[bold green]Обновление {tag} установлено! Перезапустите Zapretik.[/]")
+            return True
+    except Exception as e:
+        logger.error("Ошибка обновления: %s", e)
+    return False
 
 
 # Маркеры ошибок, по которым строки вывода winws.exe красятся в красный цвет.
@@ -751,6 +802,7 @@ def show_menu() -> None:
         table.add_row("", f"[dim]       {strat.description}[/]")
     table.add_row("[red]4.[/]", "[red]Остановить сервис[/]")
     table.add_row("[cyan]5.[/]", "[cyan]Текущая версия[/]")
+    table.add_row("[green]6.[/]", "[green]Обновить Zapretik[/]")
     table.add_row("[red]0.[/]", "[red]Выход[/]")
 
     get_console().print(table)
@@ -822,6 +874,14 @@ def main() -> int:
             if choice == "5":             # текущая версия
                 ver = get_version()
                 get_console().print(f"[cyan]Текущая версия: {ver}[/]")
+                continue
+            if choice == "6":             # обновление
+                new_ver = check_gitverse_updates()
+                if new_ver:
+                    get_console().print(f"[yellow]Доступна версия v{new_ver}. Скачиваю...[/]")
+                    download_update(new_ver)
+                else:
+                    get_console().print("[green]У вас последняя версия![/]")
                 continue
             if choice in ("1", "2", "3"): # запуск стратегии
                 run_strategy(STRATEGIES[int(choice)])
