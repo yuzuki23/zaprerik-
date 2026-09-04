@@ -8,15 +8,15 @@ PROJ = Path(r"C:\запрет")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
-VERSION = "4.0.9"
+VERSION = "5.0.0"
 TAG = f"v{VERSION}"
 
 DESC = f"""## Zapretik {VERSION}
 
-### Что нового:
-- Обновление версии до 4.0.9 (4.0.8 → 4.0.9)
+### Что нового (круглая версия → обновление стратегии):
+- Круглая версия {VERSION}: переход на новый этап обновления
+- Стратегия обхода: `general.bat` (оставлена по решению пользователя)
 - Версия синхронизирована во всех файлах: config.json, watchdog.py, main.py, service.bat, version.txt
-- status.json и reports.md обновлены до актуальной версии
 
 ### Файлы:
 - zaprerik-{TAG}.rar — Windows

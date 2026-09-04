@@ -106,10 +106,10 @@ def create_release(version):
         try:
             desc = (
                 f"## Zapretik {version}\n\n"
-                f"### Что нового:\n"
-                f"- general.bat: проверка запущен ли уже winws перед стартом\n"
-                f"- gitverse_release.py: проверка размера файла (<100 Мб)\n"
-                f"- watchdog.py: логирование при падении всех процессов одновременно\n\n"
+                f"### Что нового (круглая версия → обновление стратегии):\n"
+                f"- Круглая версия {version}: переход на новый этап обновления\n"
+                f"- Стратегия обхода: `general.bat` (оставлена по решению пользователя)\n"
+                f"- Версия синхронизирована во всех файлах: config.json, watchdog.py, main.py, service.bat, version.txt\n\n"
                 f"### Файлы:\n"
                 f"- zaprerik-{tag}.rar — Windows"
             )
