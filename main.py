@@ -100,7 +100,7 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/5.0.0 (Windows wrapper for bol-van/zapret)"
+GITHUB_UA: str = "Zapretik/5.0.1 (Windows wrapper for bol-van/zapret)"
 
 GITVERSE_REPO: str = "miamura23/zapretik"
 GITVERSE_API: str = "https://gitverse.ru/api/v1"
@@ -113,20 +113,28 @@ def get_version() -> str:
 
 def check_gitverse_updates() -> Optional[str]:
     """Проверяет последний релиз на GitVerse и возвращает версию, если есть обновление."""
-    try:
-        url = f"{GITVERSE_API}/repos/{GITVERSE_REPO}/releases/latest"
-        resp = requests.get(url, timeout=15, headers={"User-Agent": GITHUB_UA})
-        if resp.status_code != 200:
+    import time
+    url = f"{GITVERSE_API}/repos/{GITVERSE_REPO}/releases/latest"
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, timeout=15, headers={"User-Agent": GITHUB_UA})
+            if resp.status_code == 200:
+                data = resp.json()
+                tag = data.get("tag_name", "")
+                if tag.startswith("v"):
+                    tag = tag[1:]
+                current = get_version()
+                if tag and tag != current:
+                    return tag
+                return None
+            if resp.status_code >= 500:
+                time.sleep(2 * (attempt + 1))
+                continue
             return None
-        data = resp.json()
-        tag = data.get("tag_name", "")
-        if tag.startswith("v"):
-            tag = tag[1:]
-        current = get_version()
-        if tag and tag != current:
-            return tag
-    except Exception:
-        pass
+        except requests.exceptions.Timeout:
+            time.sleep(2 * (attempt + 1))
+        except Exception:
+            return None
     return None
 
 
@@ -160,19 +168,21 @@ def download_update(new_version: str) -> bool:
         if download_file(download_url, rar_path, f"Обновление {tag}"):
             import subprocess
             rar_exe = Path(r"C:\Program Files\WinRAR\Rar.exe")
-            if rar_exe.exists():
-                subprocess.run(
-                    [str(rar_exe), "x", "-o+", "-y", str(rar_path), str(BASE_DIR)],
-                    capture_output=True, timeout=120
+            if not rar_exe.exists():
+                get_console().print(
+                    "[bold red]Для обновления необходим WinRAR! "
+                    "Установите: https://www.win-rar.com/download.html[/]"
                 )
-            else:
-                import zipfile
-                try:
-                    with zipfile.ZipFile(rar_path) as zf:
-                        zf.extractall(BASE_DIR)
-                except Exception:
-                    logger.warning("Не удалось распаковать %s (не ZIP и нет WinRAR)", rar_path.name)
-                    return False
+                rar_path.unlink(missing_ok=True)
+                return False
+            result = subprocess.run(
+                [str(rar_exe), "x", "-o+", "-y", str(rar_path), str(BASE_DIR)],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                logger.error("WinRAR ошибка: %s", result.stderr)
+                rar_path.unlink(missing_ok=True)
+                return False
             rar_path.unlink(missing_ok=True)
             get_console().print(f"[bold green]Обновление {tag} установлено! Перезапустите Zapretik.[/]")
             return True

@@ -8,15 +8,15 @@ PROJ = Path(r"C:\запрет")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
-VERSION = "5.0.0"
+VERSION = "5.0.1"
 TAG = f"v{VERSION}"
 
 DESC = f"""## Zapretik {VERSION}
 
-### Что нового (круглая версия → обновление стратегии):
-- Круглая версия {VERSION}: переход на новый этап обновления
-- Стратегия обхода: `general.bat` (оставлена по решению пользователя)
-- Версия синхронизирована во всех файлах: config.json, watchdog.py, main.py, service.bat, version.txt
+### Что нового:
+- Исправлен баг распаковки: теперь требуется WinRAR (убрана ошибочная попытка распаковать .rar как .zip)
+- Добавлена проверка диапазонов числовых значений в config.json (watchdog.py)
+- Добавлен retry (3 попытки) при проверке обновлений на GitVerse
 
 ### Файлы:
 - zaprerik-{TAG}.rar — Windows

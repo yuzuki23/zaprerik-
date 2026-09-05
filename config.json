@@ -1,5 +1,5 @@
 {
-  "version": "5.0.0",
+  "version": "5.0.1",
   "watchdog": {
     "daily_restart_hour": 4,
     "liveness_timeout_sec": 360,

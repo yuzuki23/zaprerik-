@@ -44,7 +44,7 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "5.0.0",
+        "version": "5.0.1",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -87,6 +87,27 @@ def load_config():
     return defaults
 
 CFG = load_config()
+
+# Валидация диапазонов числовых значений
+RANGES = {
+    ("watchdog", "daily_restart_hour"): (0, 23),
+    ("watchdog", "liveness_timeout_sec"): (30, 3600),
+    ("watchdog", "cycle_sleep_sec"): (1, 300),
+    ("watchdog", "memory_check_interval"): (10, 600),
+    ("watchdog", "max_log_lines"): (100, 50000),
+    ("watchdog", "keep_log_lines"): (50, 5000),
+    ("winws", "restart_delay_sec"): (5, 300),
+    ("winws", "verification_attempts"): (1, 100),
+    ("winws", "verification_sleep_sec"): (1, 30),
+    ("logs", "max_size_mb"): (1, 100),
+    ("logs", "backup_count"): (0, 20),
+}
+for (section, key), (lo, hi) in RANGES.items():
+    val = CFG.get(section, {}).get(key)
+    if isinstance(val, (int, float)):
+        if val < lo or val > hi:
+            print(f"[WARN] config.json {section}.{key}={val} вне диапазона [{lo}..{hi}] — сброшено")
+            CFG[section][key] = RANGES[(section, key)][0] if isinstance(val, int) else float(RANGES[(section, key)][0])
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]

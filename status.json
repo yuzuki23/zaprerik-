@@ -1,9 +1,9 @@
 {
-  "version": "5.0.0",
-  "timestamp": "2026-09-04T19:43:56.688754",
+  "version": "5.0.1",
+  "timestamp": "2026-09-05T13:45:14.524326",
   "status": "running",
   "processes": {
-    "care": 15292,
-    "monitor": 16264
+    "care": 3812,
+    "monitor": 11856
   }
 }
