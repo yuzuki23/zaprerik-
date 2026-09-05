@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """Заботливый будильник: периодически шлёт Windows-уведомления с тёплыми фразами.
 
+Проверяет доступность Discord перед отправкой — если Discord лежит,
+отправляет уведомление о проблеме вместо обычной фразы.
+
 Запуск:
     python care.py
 """
 import os
 import subprocess
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -60,6 +64,19 @@ SENT = Path(r"C:\запрет\care_sent.txt")
 REPORTS = Path(r"C:\запрет\reports.md")
 MAX_LOG_SIZE = 512 * 1024  # 512 КБ
 KEEP_LOGS = 3
+
+
+def check_discord():
+    """Проверяет доступность Discord API. Возвращает True если работает."""
+    try:
+        req = urllib.request.Request(
+            "https://discord.com/api/v10/gateway",
+            headers={"User-Agent": "Zapretik/5.0.2"}
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        return resp.status == 200
+    except Exception:
+        return False
 
 
 def rotate(path: Path, max_size=MAX_LOG_SIZE, keep=KEEP_LOGS):
@@ -150,9 +167,13 @@ def main():
             try:
                 phrases = SLOTS[key]
                 text = phrases[len(str(int(now.timestamp()))) % len(phrases)]
+                discord_ok = check_discord()
+                if not discord_ok:
+                    text = "Коть, Discord недоступен! Проверь, может провайдер лежит. Я на связи."
                 notify("Лия: \"коть\"", text)
                 mark_sent(day, key)
-                print(f"{now:%H:%M:%S} отправлено уведомление ({key})", flush=True)
+                status = "OK" if discord_ok else "DISCORD_DOWN"
+                print(f"{now:%H:%M:%S} отправлено уведомление ({key}) [{status}]", flush=True)
             except Exception as e:
                 print(f"{now:%H:%M:%S} ОШИБКА уведомления ({key}): {e}", flush=True)
         time.sleep(30)

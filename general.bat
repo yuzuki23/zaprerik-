@@ -42,3 +42,23 @@ start "zapret: %~n0" /min "%BIN%winws.exe" --wf-tcp=80,443,2053,2083,2087,2096,8
 --filter-tcp=80,443,8443 --ipset="%LISTS%ipset-all.txt" --hostlist-exclude="%LISTS%list-exclude.txt" --hostlist-exclude="%LISTS%list-exclude-user.txt" --ipset-exclude="%LISTS%ipset-exclude.txt" --ipset-exclude="%LISTS%ipset-exclude-user.txt" --dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts --dpi-desync-hostfakesplit-mod=host=ozon.ru --new ^
 --filter-tcp=%GameFilterTCP% --ipset="%LISTS%ipset-all.txt" --ipset-exclude="%LISTS%ipset-exclude.txt" --ipset-exclude="%LISTS%ipset-exclude-user.txt" --dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-any-protocol=1 --dpi-desync-cutoff=n3 --dpi-desync-fooling=ts --dpi-desync-hostfakesplit-mod=host=ozon.ru --new ^
 --filter-udp=%GameFilterUDP% --ipset="%LISTS%ipset-all.txt" --ipset-exclude="%LISTS%ipset-exclude.txt" --ipset-exclude="%LISTS%ipset-exclude-user.txt" --dpi-desync=fake --dpi-desync-repeats=12 --dpi-desync-any-protocol=1 --dpi-desync-fake-unknown-udp="%BIN%ACTIVE_GAME_UDP.bin" --dpi-desync-cutoff=n2
+
+:: Проверка: запустился ли winws (ждём 5 сек)
+timeout /t 5 /nobreak >nul
+tasklist /FI "IMAGENAME eq winws.exe" 2>NUL | find /I "winws.exe" >nul
+if %errorlevel% NEQ 0 (
+    echo:
+    echo [FALLBACK] winws.exe не запустился — пробую упрощённую стратегию...
+    start "zapret: fallback" /min "%BIN%winws.exe" --wf-tcp=443 --filter-tcp=443 --dpi-desync=fake --dpi-desync-repeats=6
+    timeout /t 5 /nobreak >nul
+    tasklist /FI "IMAGENAME eq winws.exe" 2>NUL | find /I "winws.exe" >nul
+    if %errorlevel% NEQ 0 (
+        echo [ОШИБКА] winws.exe не запустился даже с упрощённой стратегией.
+        echo Проверьте: https://gitverse.ru/miamura23/zapretik
+        pause
+    ) else (
+        echo [OK] Упрощённая стратегия запущена (Discord только, TCP 443).
+    )
+) else (
+    echo [OK] Полная стратегия запущена.
+)

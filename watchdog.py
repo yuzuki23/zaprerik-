@@ -44,7 +44,7 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "5.0.1",
+        "version": "5.0.2",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -88,7 +88,21 @@ def load_config():
 
 CFG = load_config()
 
-# Валидация диапазонов числовых значений
+# Валидация типов и диапазонов числовых значений
+EXPECTED_TYPES = {
+    ("watchdog", "daily_restart_hour"): int,
+    ("watchdog", "liveness_timeout_sec"): int,
+    ("watchdog", "cycle_sleep_sec"): (int, float),
+    ("watchdog", "memory_check_interval"): int,
+    ("watchdog", "max_log_lines"): int,
+    ("watchdog", "keep_log_lines"): int,
+    ("winws", "restart_delay_sec"): (int, float),
+    ("winws", "verification_attempts"): int,
+    ("winws", "verification_sleep_sec"): (int, float),
+    ("logs", "rotate_by_date"): bool,
+    ("logs", "max_size_mb"): (int, float),
+    ("logs", "backup_count"): int,
+}
 RANGES = {
     ("watchdog", "daily_restart_hour"): (0, 23),
     ("watchdog", "liveness_timeout_sec"): (30, 3600),
@@ -102,6 +116,12 @@ RANGES = {
     ("logs", "max_size_mb"): (1, 100),
     ("logs", "backup_count"): (0, 20),
 }
+for (section, key), expected in EXPECTED_TYPES.items():
+    val = CFG.get(section, {}).get(key)
+    if val is not None and not isinstance(val, expected):
+        default_val = CFG.get(section, {}).get(key)
+        print(f"[WARN] config.json {section}.{key}={val!r} ({type(val).__name__}) — ожидался {expected} — сброшено")
+        CFG[section].pop(key, None)
 for (section, key), (lo, hi) in RANGES.items():
     val = CFG.get(section, {}).get(key)
     if isinstance(val, (int, float)):
@@ -216,7 +236,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "4.0.7"),
+        "version": CFG.get("version", "5.0.2"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -547,7 +567,7 @@ def kill_stray_scripts():
 def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
-    log(f"Watchdog запущен (v{CFG.get('version', '4.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '5.0.2')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -658,10 +678,13 @@ def _run():
                 winws_state["since"] = None
         time.sleep(CYCLE_SLEEP)
         cycle += 1
-        # Каждые N циклов — логируем память winws
+        # Каждые N циклов — логируем память winws и обновляем status.json
         if cycle % MEMORY_CHECK_INTERVAL == 0:
             log_winws_memory()
             rotate_by_lines(WATCHDOG_LOG)
+            procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
+            procs["winws"] = winws_pid()
+            write_status("running", {"processes": procs, "cycle": cycle})
 
 
 if __name__ == "__main__":
