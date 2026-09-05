@@ -8,15 +8,17 @@ PROJ = Path(r"C:\запрет")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
-VERSION = "5.0.1"
+VERSION = "5.0.2"
 TAG = f"v{VERSION}"
 
 DESC = f"""## Zapretik {VERSION}
 
 ### Что нового:
-- Исправлен баг распаковки: теперь требуется WinRAR (убрана ошибочная попытка распаковать .rar как .zip)
-- Добавлена проверка диапазонов числовых значений в config.json (watchdog.py)
-- Добавлен retry (3 попытки) при проверке обновлений на GitVerse
+- Валидация типов значений в config.json (int, float, bool) при загрузке watchdog
+- Автообновление timestamp в status.json каждые N циклов (ранее не обновлялся)
+- care.py: проверка доступности Discord API перед отправкой уведомлений
+- general.bat: fallback на упрощённую стратегию (TCP 443 fake) если winws.exe не запустился
+- Убрана ссылка на несуществующий default в write_status (4.0.7 → 5.0.2)
 
 ### Файлы:
 - zaprerik-{TAG}.rar — Windows

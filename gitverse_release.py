@@ -107,9 +107,10 @@ def create_release(version):
             desc = (
                 f"## Zapretik {version}\n\n"
                 f"### Что нового:\n"
-                f"- Исправлен баг распаковки: теперь требуется WinRAR (убрана ошибочная попытка распаковать .rar как .zip)\n"
-                f"- Добавлена проверка диапазонов числовых значений в config.json (watchdog.py)\n"
-                f"- Добавлен retry (3 попытки) при проверке обновлений на GitVerse\n\n"
+                f"- Валидация типов значений в config.json (int, float, bool) при загрузке watchdog\n"
+                f"- Автообновление timestamp в status.json каждые N циклов\n"
+                f"- care.py: проверка доступности Discord API перед отправкой уведомлений\n"
+                f"- general.bat: fallback на упрощённую стратегию если winws.exe не запустился\n\n"
                 f"### Файлы:\n"
                 f"- zaprerik-{tag}.rar — Windows"
             )
