@@ -111,10 +111,9 @@ def create_release(version):
             desc = (
                 f"## Zapretik {version}\n\n"
                 f"### Что нового:\n"
-                f"- Валидация формата версии X.Y.Z в config.json (неверная версия сбрасывается)\n"
-                f"- care.py: страховка от зависания на DNS-резолве (socket timeout) при проверке Discord\n"
-                f"- watchdog: автоочистка старых бэкапов логов (*.log.* старше logs.keep_days)\n"
-                f"- watchdog: уведомление в лог при смене активной стратегии обхода (+ имя в status.json)\n\n"
+                f"- watchdog: корректное имя активной стратегии обхода (в т.ч. с пробелами и скобками, напр. «general (ALT2).bat»)\n"
+                f"- Правки v5.0.3: валидация версии X.Y.Z, DNS-timeout в care.py, автоочистка логов, уведомление о смене стратегии\n"
+                f"- Правки v5.0.2: валидация типов в config.json, автообновление timestamp в status.json, проверка Discord перед уведомлением, fallback стратегии\n\n"
                 f"### Файлы:\n"
                 f"- zaprerik-{tag}.rar — Windows"
             )

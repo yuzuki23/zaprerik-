@@ -8,16 +8,14 @@ PROJ = Path(r"C:\запрет")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
-VERSION = "5.0.3"
+VERSION = "5.0.4"
 TAG = f"v{VERSION}"
 
 DESC = f"""## Zapretik {VERSION}
 
 ### Что нового:
-- Валидация формата версии X.Y.Z в config.json (неверная версия сбрасывается)
-- care.py: страховка от зависания на DNS-резолве (socket timeout) при проверке Discord
-- watchdog: автоочистка старых бэкапов логов (*.log.* старше logs.keep_days)
-- watchdog: уведомление в лог при смене активной стратегии обхода (+ имя в status.json)
+- watchdog: корректное имя активной стратегии обхода (в т.ч. с пробелами и скобками, напр. «general (ALT2).bat»)
+- Правки v5.0.3: валидация версии X.Y.Z, DNS-timeout в care.py, автоочистка логов, уведомление о смене стратегии
 - Правки v5.0.2: валидация типов в config.json, автообновление timestamp в status.json, проверка Discord перед уведомлением, fallback стратегии
 
 ### Файлы:

@@ -73,7 +73,7 @@ def check_discord():
         socket.setdefaulttimeout(5)  # страховка от зависания на DNS-резолве
         req = urllib.request.Request(
             "https://discord.com/api/v10/gateway",
-            headers={"User-Agent": "Zapretik/5.0.3"}
+            headers={"User-Agent": "Zapretik/5.0.4"}
         )
         resp = urllib.request.urlopen(req, timeout=10)
         return resp.status == 200
