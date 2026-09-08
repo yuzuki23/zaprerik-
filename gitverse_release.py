@@ -107,10 +107,10 @@ def create_release(version):
             desc = (
                 f"## Zapretik {version}\n\n"
                 f"### Что нового:\n"
-                f"- Валидация типов значений в config.json (int, float, bool) при загрузке watchdog\n"
-                f"- Автообновление timestamp в status.json каждые N циклов\n"
-                f"- care.py: проверка доступности Discord API перед отправкой уведомлений\n"
-                f"- general.bat: fallback на упрощённую стратегию если winws.exe не запустился\n\n"
+                f"- Валидация формата версии X.Y.Z в config.json (неверная версия сбрасывается)\n"
+                f"- care.py: страховка от зависания на DNS-резолве (socket timeout) при проверке Discord\n"
+                f"- watchdog: автоочистка старых бэкапов логов (*.log.* старше logs.keep_days)\n"
+                f"- watchdog: уведомление в лог при смене активной стратегии обхода (+ имя в status.json)\n\n"
                 f"### Файлы:\n"
                 f"- zaprerik-{tag}.rar — Windows"
             )

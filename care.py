@@ -8,6 +8,7 @@
     python care.py
 """
 import os
+import socket
 import subprocess
 import time
 import urllib.request
@@ -69,9 +70,10 @@ KEEP_LOGS = 3
 def check_discord():
     """Проверяет доступность Discord API. Возвращает True если работает."""
     try:
+        socket.setdefaulttimeout(5)  # страховка от зависания на DNS-резолве
         req = urllib.request.Request(
             "https://discord.com/api/v10/gateway",
-            headers={"User-Agent": "Zapretik/5.0.2"}
+            headers={"User-Agent": "Zapretik/5.0.3"}
         )
         resp = urllib.request.urlopen(req, timeout=10)
         return resp.status == 200

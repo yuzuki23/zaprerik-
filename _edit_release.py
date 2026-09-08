@@ -8,17 +8,17 @@ PROJ = Path(r"C:\запрет")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
-VERSION = "5.0.2"
+VERSION = "5.0.3"
 TAG = f"v{VERSION}"
 
 DESC = f"""## Zapretik {VERSION}
 
 ### Что нового:
-- Валидация типов значений в config.json (int, float, bool) при загрузке watchdog
-- Автообновление timestamp в status.json каждые N циклов (ранее не обновлялся)
-- care.py: проверка доступности Discord API перед отправкой уведомлений
-- general.bat: fallback на упрощённую стратегию (TCP 443 fake) если winws.exe не запустился
-- Убрана ссылка на несуществующий default в write_status (4.0.7 → 5.0.2)
+- Валидация формата версии X.Y.Z в config.json (неверная версия сбрасывается)
+- care.py: страховка от зависания на DNS-резолве (socket timeout) при проверке Discord
+- watchdog: автоочистка старых бэкапов логов (*.log.* старше logs.keep_days)
+- watchdog: уведомление в лог при смене активной стратегии обхода (+ имя в status.json)
+- Правки v5.0.2: валидация типов в config.json, автообновление timestamp в status.json, проверка Discord перед уведомлением, fallback стратегии
 
 ### Файлы:
 - zaprerik-{TAG}.rar — Windows

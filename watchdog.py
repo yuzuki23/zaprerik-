@@ -13,6 +13,7 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -44,7 +45,7 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "5.0.2",
+        "version": "5.0.3",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -62,6 +63,7 @@ def load_config():
             "rotate_by_date": True,
             "max_size_mb": 5,
             "backup_count": 3,
+            "keep_days": 14,
         },
     }
     if CONFIG_FILE.exists():
@@ -102,6 +104,7 @@ EXPECTED_TYPES = {
     ("logs", "rotate_by_date"): bool,
     ("logs", "max_size_mb"): (int, float),
     ("logs", "backup_count"): int,
+    ("logs", "keep_days"): int,
 }
 RANGES = {
     ("watchdog", "daily_restart_hour"): (0, 23),
@@ -115,6 +118,7 @@ RANGES = {
     ("winws", "verification_sleep_sec"): (1, 30),
     ("logs", "max_size_mb"): (1, 100),
     ("logs", "backup_count"): (0, 20),
+    ("logs", "keep_days"): (1, 365),
 }
 for (section, key), expected in EXPECTED_TYPES.items():
     val = CFG.get(section, {}).get(key)
@@ -128,6 +132,12 @@ for (section, key), (lo, hi) in RANGES.items():
         if val < lo or val > hi:
             print(f"[WARN] config.json {section}.{key}={val} вне диапазона [{lo}..{hi}] — сброшено")
             CFG[section][key] = RANGES[(section, key)][0] if isinstance(val, int) else float(RANGES[(section, key)][0])
+
+# Валидация формата версии X.Y.Z
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 5.0.3")
+    CFG["version"] = "5.0.3"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -162,6 +172,7 @@ entry_up = {"last_down": None}
 winws_state = {"pid": None, "since": None}
 daily_restart_done_day = None
 planned_restart = set()
+strategy_state = {"name": None}
 
 
 def acquire_lock():
@@ -209,8 +220,14 @@ def is_admin():
         return False
 
 
-def rotate(path: Path, max_size=5*1024*1024, keep=3):
-    """Если лог разросся — сдвигает копии (.1, .2, ...) и начинает новый."""
+def rotate(path: Path, max_size=None, keep=None):
+    """Если лог разросся — сдвигает копии (.1, .2, ...) и начинает новый.
+
+    max_size/keep по умолчанию берутся из config.json (logs.max_size_mb / logs.backup_count)."""
+    if max_size is None:
+        max_size = int(CFG["logs"]["max_size_mb"]) * 1024 * 1024
+    if keep is None:
+        keep = CFG["logs"]["backup_count"]
     if not path.exists() or path.stat().st_size < max_size:
         return
     for i in range(keep - 1, 0, -1):
@@ -221,6 +238,43 @@ def rotate(path: Path, max_size=5*1024*1024, keep=3):
             src.unlink()
     path.with_name(f"{path.name}.1").write_bytes(path.read_bytes())
     path.write_text("", encoding="utf-8")
+
+
+def cleanup_old_logs(keep_days=None):
+    """Автоочистка старых логов: удаляет повёрнутые копии (*.log.*), старше keep_days.
+
+    Основные .log не трогаем — только бэкапы .1/.2/.3 в BASE_DIR."""
+    if keep_days is None:
+        keep_days = CFG["logs"]["keep_days"]
+    cutoff = time.time() - keep_days * 86400
+    try:
+        for p in BASE_DIR.glob("*.log.*"):
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+                log(f"Автоочистка логов: удалён устаревший бэкап {p.name}")
+    except Exception:
+        pass
+
+
+def active_strategy():
+    """Имя активной стратегии обхода — файла .bat, указанного в параметре службы zapret."""
+    try:
+        r = subprocess.run(
+            ["reg", "query", r"HKLM\System\CurrentControlSet\Services\zapret", "/v", "zapret-discord-youtube"],
+            capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW,
+        )
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if "zapret-discord-youtube" in line.lower():
+                parts = line.split()
+                for part in parts[1:]:
+                    if part.lower().endswith(".bat"):
+                        return part
+                if parts:
+                    return parts[-1]
+    except Exception:
+        pass
+    return None
 
 
 def log(msg):
@@ -236,7 +290,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "5.0.2"),
+        "version": CFG.get("version", "5.0.3"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -567,7 +621,8 @@ def kill_stray_scripts():
 def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
-    log(f"Watchdog запущен (v{CFG.get('version', '5.0.2')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    cleanup_old_logs()
+    log(f"Watchdog запущен (v{CFG.get('version', '5.0.3')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -678,13 +733,22 @@ def _run():
                 winws_state["since"] = None
         time.sleep(CYCLE_SLEEP)
         cycle += 1
+        # Отслеживание активной стратегии обхода: при смене — уведомление в лог
+        strat = active_strategy()
+        if strat and strat != strategy_state.get("name"):
+            if strategy_state.get("name") is not None:
+                log(f"СМЕНА СТРАТЕГИИ: {strategy_state['name']} -> {strat}")
+            else:
+                log(f"Активная стратегия обхода: {strat}")
+            strategy_state["name"] = strat
         # Каждые N циклов — логируем память winws и обновляем status.json
         if cycle % MEMORY_CHECK_INTERVAL == 0:
             log_winws_memory()
             rotate_by_lines(WATCHDOG_LOG)
+            cleanup_old_logs()
             procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
             procs["winws"] = winws_pid()
-            write_status("running", {"processes": procs, "cycle": cycle})
+            write_status("running", {"processes": procs, "cycle": cycle, "strategy": strategy_state.get("name")})
 
 
 if __name__ == "__main__":
