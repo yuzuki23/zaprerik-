@@ -25,7 +25,11 @@ def build_rar(version):
     subprocess.run(
         [str(RAR), "a", "-ep1", "-r", "-m5",
          "-x*\\.git", "-x*\\.git\\*", "-x*\\__pycache__", "-x*\\__pycache__\\*",
-         "-x*.log", str(rar), "*"],
+         "-x*.log", "-x*gitverse_token.txt", "-x*github_token.txt",
+         "-x*\\.gitverse_session", "-x*\\.gitverse_session\\*",
+         "-x*reports.md", "-x*status.json", "-x*discord_status.txt", "-x*care_sent.txt",
+         "-x*_debug_*.png",
+         str(rar), "*"],
         capture_output=True, text=True, timeout=300, cwd=str(PROJ)
     )
     if not rar.exists():

@@ -19,7 +19,7 @@ def delete_asset(tag, asset_name):
         )
         page = browser.pages[0] if browser.pages else browser.new_page()
 
-        page.goto(REPO_URL, timeout=60000)
+        page.goto(f"{REPO_URL}/-/releases/tag/{tag}", timeout=60000)
         time.sleep(5)
 
         try:
@@ -28,15 +28,9 @@ def delete_asset(tag, asset_name):
         except Exception:
             pass
 
-        # Релизы
-        page.locator('nav a:has-text("Релизы")').first.click()
-        time.sleep(5)
-
-        # Прокручиваем НАВЕРХ
+        # Прокручиваем к блоку ассетов и разворачиваем его
         page.evaluate("window.scrollTo(0, 0)")
         time.sleep(1)
-
-        # Разворачиваем ассеты v4.0.4 — кликаем "Ассеты 3"
         print(f"Ищу ассеты {tag}...")
         try:
             assets_btn = page.locator('text="Ассеты"').first
