@@ -103,7 +103,7 @@ GITHUB_API: str = "https://api.github.com"
 GITHUB_UA: str = "Zapretik/5.0.3 (Windows wrapper for bol-van/zapret)"
 
 GITVERSE_REPO: str = "miamura23/zapretik"
-GITVERSE_API: str = "https://gitverse.ru/api/v1"
+GITVERSE_API: str = "https://gitverse.ru/sbt/api/v1"
 
 
 def get_version() -> str:
@@ -114,18 +114,23 @@ def get_version() -> str:
 def check_gitverse_updates() -> Optional[str]:
     """Проверяет последний релиз на GitVerse и возвращает версию, если есть обновление."""
     import time
-    url = f"{GITVERSE_API}/repos/{GITVERSE_REPO}/releases/latest"
+    url = f"{GITVERSE_API}/repos/{GITVERSE_REPO}/releases?limit=5"
     for attempt in range(3):
         try:
             resp = requests.get(url, timeout=15, headers={"User-Agent": GITHUB_UA})
             if resp.status_code == 200:
                 data = resp.json()
-                tag = data.get("tag_name", "")
-                if tag.startswith("v"):
-                    tag = tag[1:]
+                entries = data.get("data", []) if isinstance(data, dict) else data
                 current = get_version()
-                if tag and tag != current:
-                    return tag
+                for rel in entries:
+                    tag = rel.get("tagName") or rel.get("tag_name") or ""
+                    if isinstance(tag, str) and tag.startswith("v"):
+                        tag = tag[1:]
+                    if not tag:
+                        continue
+                    if tag != current:
+                        return tag
+                    break
                 return None
             if resp.status_code >= 500:
                 time.sleep(2 * (attempt + 1))
@@ -148,7 +153,7 @@ def download_update(new_version: str) -> bool:
             logger.error("Не удалось получить информацию о релизе %s", tag)
             return False
         data = resp.json()
-        assets = data.get("assets", [])
+        assets = data.get("attachments") or data.get("assets") or []
         rar_asset = None
         for asset in assets:
             if asset.get("name", "").endswith(".rar"):
@@ -157,7 +162,7 @@ def download_update(new_version: str) -> bool:
         if not rar_asset:
             logger.error("В релизе %s не найден .rar файл", tag)
             return False
-        download_url = rar_asset.get("browser_download_url")
+        download_url = rar_asset.get("downloadUrl") or rar_asset.get("browser_download_url")
         if not download_url:
             logger.error("Не удалось получить ссылку на скачивание")
             return False

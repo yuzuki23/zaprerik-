@@ -27,7 +27,7 @@ PROJ = Path(r"C:\запрет")
 RAR = Path(r"C:\Program Files\WinRAR\Rar.exe")
 OUT = Path(r"C:\Users\Leonid\AppData\Local\Temp\opencode\zapret_test")
 REPO_GV = "miamura23/zapretik"
-API_BASE = "https://gitverse.ru/api/v1"
+API_BASE = "https://gitverse.ru/sbt/api/v1"
 SERVICE_BAT = PROJ / "service.bat"
 MAIN_PY = PROJ / "main.py"
 RETRIES = 12
@@ -170,16 +170,25 @@ def _api(method, url, token, data=None, raw=None, ctype="application/json"):
         return -1, str(e)
 
 
+def _release_entries(out):
+    """Из тела ответа GitVerse API достаёт список релизов ({total, data:[...]} или список)."""
+    try:
+        data = json.loads(out)
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        return data.get("data") or []
+    if isinstance(data, list):
+        return data
+    return []
+
+
 def find_release_id(tag, token):
     st, out = _api("GET", f"{API_BASE}/repos/{REPO_GV}/releases?limit=50", token)
     if st != 200:
         return None
-    try:
-        items = json.loads(out)
-    except Exception:
-        return None
-    for rel in items:
-        if rel.get("tag_name") == tag:
+    for rel in _release_entries(out):
+        if rel.get("tagName") == tag or rel.get("tag_name") == tag:
             return rel.get("id")
     return None
 
@@ -188,12 +197,8 @@ def find_release_upload_url(tag, token):
     st, out = _api("GET", f"{API_BASE}/repos/{REPO_GV}/releases?limit=50", token)
     if st != 200:
         return None
-    try:
-        items = json.loads(out)
-    except Exception:
-        return None
-    for rel in items:
-        if rel.get("tag_name") == tag:
+    for rel in _release_entries(out):
+        if rel.get("tagName") == tag or rel.get("tag_name") == tag:
             return rel.get("upload_url")
     return None
 

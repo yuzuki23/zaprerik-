@@ -169,7 +169,7 @@ def create_release(version):
                 print("  Кнопка не найдена! Смотри _debug_bottom.png")
 
             time.sleep(5)
-            print(f"\nГотово: {REPO_URL}/-/releases/tag/{tag}")
+            print(f"\nГотово: {REPO_URL}/releases/tag/{tag}")
         except Exception as e:
             print(f"  Ошибка: {e}")
 

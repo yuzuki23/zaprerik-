@@ -19,7 +19,7 @@ def delete_asset(tag, asset_name):
         )
         page = browser.pages[0] if browser.pages else browser.new_page()
 
-        page.goto(f"{REPO_URL}/-/releases/tag/{tag}", timeout=60000)
+        page.goto(f"{REPO_URL}/releases/tag/{tag}", timeout=60000)
         time.sleep(5)
 
         try:
