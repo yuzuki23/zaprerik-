@@ -1,5 +1,5 @@
 @echo off
-set "LOCAL_VERSION=5.0.5"
+set "LOCAL_VERSION=5.0.6"
 
 :: Проверка наличия Python
 where python >nul 2>nul
@@ -388,16 +388,16 @@ goto menu
 chcp 437 > nul
 cls
 
-:: Set current version and URLs
-set "GITHUB_VERSION_URL=https://raw.githubusercontent.com/yuzuki23/zaprerik-/main/.service/version.txt"
-set "GITHUB_RELEASE_URL=https://github.com/yuzuki23/zaprerik-/releases/tag/"
-set "GITHUB_DOWNLOAD_URL=https://github.com/yuzuki23/zaprerik-/releases/latest"
+:: Set current version and URLs (GitVerse)
+set "VERSION_API_URL=https://gitverse.ru/sbt/api/v1/repos/miamura23/zapretik/releases?limit=1"
+set "RELEASE_URL=https://gitverse.ru/miamura23/zapretik/releases/tag/"
+set "RELEASE_DOWNLOAD_URL=https://gitverse.ru/miamura23/zapretik/releases"
 
-:: Get the latest version from GitHub
-for /f "delims=" %%A in ('powershell -NoProfile -Command "(Invoke-WebRequest -Uri \"%GITHUB_VERSION_URL%\" -Headers @{\"Cache-Control\"=\"no-cache\"} -UseBasicParsing -TimeoutSec 5).Content.Trim()" 2^>nul') do set "GITHUB_VERSION=%%A"
+:: Get the latest version from GitVerse (public sbt API, no token required)
+for /f "delims=" %%A in ('powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $r=Invoke-RestMethod -Uri \"%VERSION_API_URL%\" -UseBasicParsing -TimeoutSec 5; $t=$r.data[0].tagName; if($t -like 'v*'){$t=$t.Substring(1)}; Write-Output $t" 2^>nul') do set "LATEST_VERSION=%%A"
 
 :: Error handling
-if not defined GITHUB_VERSION (
+if not defined LATEST_VERSION (
     echo Warning: failed to fetch the latest version. This warning does not affect the operation of zapret
     timeout /T 9
     if "%1"=="soft" exit 
@@ -405,7 +405,7 @@ if not defined GITHUB_VERSION (
 )
 
 :: Version comparison
-if "%LOCAL_VERSION%"=="%GITHUB_VERSION%" (
+if "%LOCAL_VERSION%"=="%LATEST_VERSION%" (
     echo Latest version installed: %LOCAL_VERSION%
     
     if "%1"=="soft" exit 
@@ -413,11 +413,11 @@ if "%LOCAL_VERSION%"=="%GITHUB_VERSION%" (
     goto menu
 ) 
 
-echo New version available: %GITHUB_VERSION%
-echo Release page: %GITHUB_RELEASE_URL%%GITHUB_VERSION%
+echo New version available: %LATEST_VERSION%
+echo Release page: %RELEASE_URL%v%LATEST_VERSION%
 
 echo Opening the download page...
-start "" "%GITHUB_DOWNLOAD_URL%"
+start "" "%RELEASE_DOWNLOAD_URL%"
 
 
 if "%1"=="soft" exit 

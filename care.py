@@ -67,7 +67,7 @@ MAX_LOG_SIZE = 512 * 1024  # 512 КБ
 KEEP_LOGS = 3
 
 # Версия из config.json (единый источник), fallback на случай битого config.
-_APP_VERSION = "5.0.5"
+_APP_VERSION = "5.0.6"
 try:
     import json as _json
     import re as _re

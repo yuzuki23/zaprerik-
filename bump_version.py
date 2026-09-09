@@ -47,14 +47,13 @@ def bump(new_ver: str):
         encoding="utf-8",
     )
 
-    # watchdog.py: fallback-значения версии (если config битый) обновляем целиком
-    wd = PROJ / "watchdog.py"
-    wt = wd.read_text(encoding="utf-8")
+    # fallback-значения версии (если config битый) в watchdog.py, main.py, care.py
     if version_ok(old) and old != new_ver:
-        wt = wt.replace(old, new_ver)
-        wd.write_text(wt, encoding="utf-8")
+        for name in ("watchdog.py", "main.py", "care.py"):
+            p = PROJ / name
+            p.write_text(p.read_text(encoding="utf-8").replace(old, new_ver), encoding="utf-8")
 
-    print(f"Версия {old or '(отсутствует)'} -> {new_ver} обновлена: config.json, .service/version.txt, service.bat, watchdog.py")
+    print(f"Версия {old or '(отсутствует)'} -> {new_ver} обновлена: config.json, .service/version.txt, service.bat, watchdog.py, main.py, care.py")
 
 
 if __name__ == "__main__":
