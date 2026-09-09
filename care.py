@@ -66,6 +66,20 @@ REPORTS = Path(r"C:\запрет\reports.md")
 MAX_LOG_SIZE = 512 * 1024  # 512 КБ
 KEEP_LOGS = 3
 
+# Версия из config.json (единый источник), fallback на случай битого config.
+_APP_VERSION = "5.0.5"
+try:
+    import json as _json
+    import re as _re
+    _cfg = _json.loads((Path(__file__).resolve().parent / "config.json").read_text(encoding="utf-8"))
+    _ver = _cfg.get("version", "")
+    if isinstance(_ver, str) and _re.fullmatch(r"\d+\.\d+\.\d+", _ver):
+        _APP_VERSION = _ver
+except Exception:
+    pass
+
+_USER_AGENT = f"Zapretik/{_APP_VERSION}"
+
 
 def check_discord():
     """Проверяет доступность Discord API. Возвращает True если работает."""
@@ -73,7 +87,7 @@ def check_discord():
         socket.setdefaulttimeout(5)  # страховка от зависания на DNS-резолве
         req = urllib.request.Request(
             "https://discord.com/api/v10/gateway",
-            headers={"User-Agent": "Zapretik/5.0.4"}
+            headers={"User-Agent": _USER_AGENT}
         )
         resp = urllib.request.urlopen(req, timeout=10)
         return resp.status == 200

@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
 """Редактирование описания релиза на GitVerse через Playwright."""
+import json
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+
+from release_desc import build_desc
 
 PROJ = Path(r"C:\запрет")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
-VERSION = "5.0.4"
+with (PROJ / "config.json").open(encoding="utf-8") as f:
+    VERSION = json.load(f).get("version", "5.0.5")
 TAG = f"v{VERSION}"
 
-DESC = f"""## Zapretik {VERSION}
-
-### Что нового:
-- watchdog: корректное имя активной стратегии обхода (в т.ч. с пробелами и скобками, напр. «general (ALT2).bat»)
-- Правки v5.0.3: валидация версии X.Y.Z, DNS-timeout в care.py, автоочистка логов, уведомление о смене стратегии
-- Правки v5.0.2: валидация типов в config.json, автообновление timestamp в status.json, проверка Discord перед уведомлением, fallback стратегии
-
-### Файлы:
-- zaprerik-{TAG}.rar — Windows
-"""
+DESC = build_desc(VERSION)
 
 with sync_playwright() as p:
     browser = p.chromium.launch_persistent_context(

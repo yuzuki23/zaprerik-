@@ -100,7 +100,25 @@ BUNDLE_ZIP_URL: str = (
 )
 
 GITHUB_API: str = "https://api.github.com"
-GITHUB_UA: str = "Zapretik/5.0.4 (Windows wrapper for bol-van/zapret)"
+
+# Версия берётся из config.json (единый источник); fallback — на случай битого config.
+import json as _json
+import re as _re
+
+
+def _load_version() -> str:
+    try:
+        cfg = _json.loads((BASE_DIR / "config.json").read_text(encoding="utf-8"))
+        ver = cfg.get("version", "")
+        if isinstance(ver, str) and _re.fullmatch(r"\d+\.\d+\.\d+", ver):
+            return ver
+    except Exception:
+        pass
+    return "5.0.5"
+
+
+APP_VERSION = _load_version()
+GITHUB_UA: str = f"Zapretik/{APP_VERSION} (Windows wrapper for bol-van/zapret)"
 
 GITVERSE_REPO: str = "miamura23/zapretik"
 GITVERSE_API: str = "https://gitverse.ru/sbt/api/v1"

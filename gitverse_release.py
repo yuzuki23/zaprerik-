@@ -9,9 +9,11 @@ import sys
 import time
 from pathlib import Path
 
+from release_desc import build_desc
+
 PROJ = Path(r"C:\запрет")
 RAR = Path(r"C:\Program Files\WinRAR\Rar.exe")
-OUT = Path(r"C:\Users\Leonid\AppData\Local\Temp\opencode\zapret_test")
+OUT = Path(r"C:\Users\Leonid\AppData\Local\Temp\opencode\zapret_test\releases")
 REPO_URL = "https://gitverse.ru/miamura23/zapretik"
 USER_DATA = PROJ / ".gitverse_session"
 
@@ -108,15 +110,7 @@ def create_release(version):
 
         # Описание
         try:
-            desc = (
-                f"## Zapretik {version}\n\n"
-                f"### Что нового:\n"
-                f"- watchdog: корректное имя активной стратегии обхода (в т.ч. с пробелами и скобками, напр. «general (ALT2).bat»)\n"
-                f"- Правки v5.0.3: валидация версии X.Y.Z, DNS-timeout в care.py, автоочистка логов, уведомление о смене стратегии\n"
-                f"- Правки v5.0.2: валидация типов в config.json, автообновление timestamp в status.json, проверка Discord перед уведомлением, fallback стратегии\n\n"
-                f"### Файлы:\n"
-                f"- zaprerik-{tag}.rar — Windows"
-            )
+            desc = build_desc(version)
             editor = page.locator('[contenteditable="true"]').first
             editor.click()
             time.sleep(0.5)
@@ -139,7 +133,7 @@ def create_release(version):
             page.evaluate("window.scrollBy(0, 500)")
             time.sleep(0.5)
 
-        page.screenshot(path=str(PROJ / "_debug_bottom.png"))
+        page.screenshot(path=str(OUT / f"_debug_bottom_{tag}.png"))
 
         # Ищем кнопку "Создать" или "Опубликовать"
         try:
@@ -172,7 +166,7 @@ def create_release(version):
         except Exception as e:
             print(f"  Ошибка: {e}")
 
-        page.screenshot(path=str(PROJ / "_debug_after.png"))
+        page.screenshot(path=str(OUT / f"_debug_after_{tag}.png"))
         browser.close()
 
 
@@ -186,3 +180,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
