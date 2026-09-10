@@ -8,6 +8,9 @@ from typing import Optional
 
 # Что нового по текущей версии (для верхней — список «Что нового»).
 _CHANGES: dict = {
+    "5.0.7": [
+        "Стратегии под Билайн: general (BEELINE).bat (fake + md5sig) и general (BEELINE FRAG).bat (fake + fragment) — без подмены SNI, которую Билайн ловит",
+    ],
     "5.0.6": [
         "service.bat: проверка обновлений переведена на GitVerse API (ссылка на старый GitHub-репозиторий не работала)",
         "bump_version.py: при повышении версии обновляет fallback-версии и в main.py, и в care.py",
@@ -24,6 +27,7 @@ _CHANGES: dict = {
 
 # Краткая строка «Правки vX.Y.Z: …» для предыдущих версий (выводится автоматически для всех версий старше текущей).
 _VERSION_SUMMARIES: dict = {
+    "5.0.6": "service.bat проверяет обновления через GitVerse API; bump_version.py обновляет fallback-версии в main.py и care.py",
     "5.0.5": "единый источник версии (config.json), bump_version.py, шаблон описания release_desc.py, скриншоты релизера во временную папку",
     "5.0.4": "watchdog: корректное имя активной стратегии обхода (пробелы и скобки в имени)",
     "5.0.3": "валидация версии X.Y.Z, DNS-timeout в care.py, автоочистка логов, уведомление о смене стратегии",
