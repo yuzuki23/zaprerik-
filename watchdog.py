@@ -45,7 +45,7 @@ NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "5.0.7",
+        "version": "5.0.8",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -136,8 +136,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 5.0.7")
-    CFG["version"] = "5.0.7"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 5.0.8")
+    CFG["version"] = "5.0.8"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -296,7 +296,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "5.0.7"),
+        "version": CFG.get("version", "5.0.8"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -307,6 +307,29 @@ def write_status(status, details=None):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def update_strategy_in_config(name):
+    """Сохраняет активную стратегию в config.json (поле strategy).
+
+    Единый источник активной стратегии: reinstall_service.py читает его,
+    чтобы при падении winws восстанавливалась именно активная стратегия,
+    а не general.bat по умолчанию.
+    """
+    if not name:
+        return
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+        if cfg.get("strategy") == name:
+            return
+        cfg["strategy"] = name
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, ensure_ascii=False, indent=2)
+            f.write("\n")
+        log(f"Активная стратегия сохранена в config.json: {name}")
+    except Exception as e:
+        log(f"ОШИБКА сохранения стратегии в config.json: {e}")
 
 
 def start_proc(entry):
@@ -628,7 +651,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '5.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '5.0.8')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -746,6 +769,7 @@ def _run():
                 log(f"СМЕНА СТРАТЕГИИ: {strategy_state['name']} -> {strat}")
             else:
                 log(f"Активная стратегия обхода: {strat}")
+            update_strategy_in_config(strat)
             strategy_state["name"] = strat
         # Каждые N циклов — логируем память winws и обновляем status.json
         if cycle % MEMORY_CHECK_INTERVAL == 0:

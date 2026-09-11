@@ -1,22 +1,44 @@
 # -*- coding: utf-8 -*-
-"""Пересоздаёт службу zapret из аргументов general.bat (используется при восстановлении).
+"""Пересоздаёт службу zapret из активной стратегии (config.json -> strategy).
 
 Сделано идемпотентным (3.0.2): если служба уже зарегистрирована и её binPath
-совпадает с вычисленным из general.bat — НЕ удаляем и НЕ пересоздаём её
+совпадает с вычисленным из активной стратегии — НЕ удаляем и НЕ пересоздаём её
 (sc delete/sc create пропускаются). Это устраняет хрупкость, когда служба
 «сама удалялась» при каждой попытке поднятия. Пересоздание только если служба
-отсутствует либо binPath изменился (например, обновился general.bat).
+отсутствует либо binPath изменился.
+
+В 5.0.8 активная стратегия читается из config.json (поле strategy), а не
+жёстко из general.bat — при падении winws восстанавливается именно она.
 """
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 BASE = Path(r"C:\запрет")
-BAT = BASE / "general.bat"
 WINWS = BASE / "bin" / "winws.exe"
 LISTS = BASE / "lists"
 GAME_TCP = "12"   # game-фильтр выключен
 GAME_UDP = "12"
+
+
+def pick_active_bat():
+    """Возвращает путь к .bat активной стратегии из config.json (fallback general.bat)."""
+    cfg = {}
+    try:
+        cfg = json.loads((BASE / "config.json").read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    name = str(cfg.get("strategy", "") or "general").strip()
+    for candidate in (name if name.lower().endswith(".bat") else name + ".bat",
+                      "general.bat"):
+        p = BASE / candidate
+        if p.exists():
+            return p
+    return BASE / "general.bat"
+
+
+BAT = pick_active_bat()
 
 text = BAT.read_text(encoding="utf-8", errors="replace")
 # убираем переносы строк и символы продолжения строк '^'
@@ -24,16 +46,16 @@ flat = text.replace("\r\n", " ").replace("\n", " ").replace("^", "")
 marker = '"%BIN%winws.exe"'
 idx = flat.find(marker)
 if idx == -1:
-    print("Не найден вызов winws.exe в general.bat")
+    print(f"Не найден вызов winws.exe в {BAT.name}")
     sys.exit(1)
 args = flat[idx + len(marker):].strip()
 args = args.replace("%BIN%", str(BASE / "bin") + "\\")
-args = args.replace("%LISTS%", str(LISTS) + "\\")
 args = args.replace("%LISTS%", str(LISTS) + "\\")
 args = args.replace("%GameFilterTCP%", GAME_TCP)
 args = args.replace("%GameFilterUDP%", GAME_UDP)
 
 binpath = '"' + str(WINWS) + '" ' + args
+print(f"Активная стратегия: {BAT.name}")
 print("BINPATH length:", len(binpath))
 print(binpath[:200], "...")
 
