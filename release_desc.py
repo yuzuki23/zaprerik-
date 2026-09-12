@@ -8,6 +8,11 @@ from typing import Optional
 
 # Что нового по текущей версии (для верхней — список «Что нового»).
 _CHANGES: dict = {
+    "6.0.0": [
+        "Крупное обновление без смены стратегии (активная осталась прежней — general (ALT))",
+        "reinstall_service.py: правильный разбор аргументов winws из .bat — мусор после вызова (fallback-блок) больше не попадает в binPath службы",
+        "Надёжное авто-восстановление: сторож пересоздаёт и запускает службу из активной стратегии config.json",
+    ],
     "5.0.9": [
         "Сторож шлёт уведомления (тост): при падении/восстановлении winws и смене стратегии обхода — видно и без чтения логов",
         "Единый модуль уведомлений utils/notify.py (используют и будильник care.py, и сторож watchdog.py)",
@@ -35,6 +40,9 @@ _CHANGES: dict = {
 
 # Краткая строка «Правки vX.Y.Z: …» для предыдущих версий (выводится автоматически для всех версий старше текущей).
 _VERSION_SUMMARIES: dict = {
+    "5.0.9": "сторож шлёт тосты о падении/восстановлении winws и смене стратегии; единый модуль уведомлений utils/notify.py",
+    "5.0.8": "reinstall_service.py восстанавливает активную стратегию из config.json; watchdog сохраняет стратегию в config.json",
+    "5.0.7": "стратегии под Билайн: general (BEELINE) и general (BEELINE FRAG) — без подмены SNI",
     "5.0.6": "service.bat проверяет обновления через GitVerse API; bump_version.py обновляет fallback-версии в main.py и care.py",
     "5.0.5": "единый источник версии (config.json), bump_version.py, шаблон описания release_desc.py, скриншоты релизера во временную папку",
     "5.0.4": "watchdog: корректное имя активной стратегии обхода (пробелы и скобки в имени)",
@@ -49,7 +57,7 @@ def _version_key(ver: str) -> tuple:
 
 def build_desc(version: Optional[str] = None) -> str:
     """Markdown-описание релиза Zapretik."""
-    ver = version or "5.0.9"
+    ver = version or "6.0.0"
     tag = f"v{ver}"
     lines = [f"## Zapretik {ver}", "", "### Что нового:"]
     for item in _CHANGES.get(ver, ["Внутренние правки и обслуживание."]):

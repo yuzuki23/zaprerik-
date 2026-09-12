@@ -41,14 +41,28 @@ def pick_active_bat():
 BAT = pick_active_bat()
 
 text = BAT.read_text(encoding="utf-8", errors="replace")
-# убираем переносы строк и символы продолжения строк '^'
-flat = text.replace("\r\n", " ").replace("\n", " ").replace("^", "")
+# Собираем только реальные аргументы winws: строки, начинающиеся с "--"
+# после вызова "%BIN%winws.exe", до первого комментария/FALLBACK-блока.
 marker = '"%BIN%winws.exe"'
-idx = flat.find(marker)
-if idx == -1:
+found = False
+args_parts = []
+for raw in text.splitlines():
+    s = raw.strip()
+    if not found:
+        if marker in s and (s.startswith("start") or s.startswith('"%BIN%winws.exe"')):
+            tail = s.split(marker, 1)[1].strip()
+            if tail:
+                args_parts.append(tail)
+            found = True
+        continue
+    if s.startswith("--"):
+        args_parts.append(s.rstrip("^").strip())
+    elif s.startswith("::") or s.startswith("timeout"):
+        break
+if not found:
     print(f"Не найден вызов winws.exe в {BAT.name}")
     sys.exit(1)
-args = flat[idx + len(marker):].strip()
+args = " ".join(args_parts).strip()
 args = args.replace("%BIN%", str(BASE / "bin") + "\\")
 args = args.replace("%LISTS%", str(LISTS) + "\\")
 args = args.replace("%GameFilterTCP%", GAME_TCP)
