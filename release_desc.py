@@ -8,6 +8,10 @@ from typing import Optional
 
 # Что нового по текущей версии (для верхней — список «Что нового»).
 _CHANGES: dict = {
+    "5.0.9": [
+        "Сторож шлёт уведомления (тост): при падении/восстановлении winws и смене стратегии обхода — видно и без чтения логов",
+        "Единый модуль уведомлений utils/notify.py (используют и будильник care.py, и сторож watchdog.py)",
+    ],
     "5.0.8": [
         "reinstall_service.py: читает активную стратегию из config.json (а не жёстко general.bat) — при падении winws восстанавливается именно она",
         "watchdog: при смене стратегии сохраняет её в config.json (поле strategy) — единый источник активной стратегии",
@@ -45,7 +49,7 @@ def _version_key(ver: str) -> tuple:
 
 def build_desc(version: Optional[str] = None) -> str:
     """Markdown-описание релиза Zapretik."""
-    ver = version or "5.0.8"
+    ver = version or "5.0.9"
     tag = f"v{ver}"
     lines = [f"## Zapretik {ver}", "", "### Что нового:"]
     for item in _CHANGES.get(ver, ["Внутренние правки и обслуживание."]):

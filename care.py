@@ -10,10 +10,14 @@
 import os
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from utils.notify import notify
 
 try:
     os.system("")
@@ -67,7 +71,7 @@ MAX_LOG_SIZE = 512 * 1024  # 512 КБ
 KEEP_LOGS = 3
 
 # Версия из config.json (единый источник), fallback на случай битого config.
-_APP_VERSION = "5.0.8"
+_APP_VERSION = "5.0.9"
 try:
     import json as _json
     import re as _re
@@ -107,27 +111,6 @@ def rotate(path: Path, max_size=MAX_LOG_SIZE, keep=KEEP_LOGS):
             src.unlink()
     path.with_name(f"{path.name}.1").write_bytes(path.read_bytes())
     path.write_text("", encoding="utf-8")
-
-
-def notify(title, text):
-    ps1 = (
-        "Add-Type -AssemblyName System.Windows.Forms\n"
-        "Add-Type -AssemblyName System.Drawing\n"
-        "$n=New-Object System.Windows.Forms.NotifyIcon\n"
-        "$n.Icon=[System.Drawing.SystemIcons]::Information\n"
-        "$n.Visible=$true\n"
-        f"$n.ShowBalloonTip(15000,'{title}','{text}',[System.Windows.Forms.ToolTipIcon]::Info)\n"
-        "$t=New-Object System.Windows.Forms.Timer\n"
-        "$t.Interval=16000\n"
-        "$t.Add_Tick({$n.Visible=$false;$n.Dispose();[System.Windows.Forms.Application]::Exit()})\n"
-        "$t.Start()\n"
-        "[System.Windows.Forms.Application]::Run()\n"
-    )
-    path = Path(os.environ.get("TEMP", r"C:\запрет")) / "care_notify.ps1"
-    path.write_text(ps1, encoding="utf-8-sig")
-    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
-                      "-ExecutionPolicy", "Bypass", "-File", str(path)],
-                     creationflags=subprocess.CREATE_NO_WINDOW)
 
 
 def already_sent(day, slot):
