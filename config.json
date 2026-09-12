@@ -1,5 +1,5 @@
 {
-  "version": "6.0.0",
+  "version": "6.0.1",
   "strategy": "general (ALT)",
   "watchdog": {
     "daily_restart_hour": 4,

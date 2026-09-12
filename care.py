@@ -71,7 +71,7 @@ MAX_LOG_SIZE = 512 * 1024  # 512 КБ
 KEEP_LOGS = 3
 
 # Версия из config.json (единый источник), fallback на случай битого config.
-_APP_VERSION = "6.0.0"
+_APP_VERSION = "6.0.1"
 try:
     import json as _json
     import re as _re
@@ -166,13 +166,9 @@ def main():
             try:
                 phrases = SLOTS[key]
                 text = phrases[len(str(int(now.timestamp()))) % len(phrases)]
-                discord_ok = check_discord()
-                if not discord_ok:
-                    text = "Коть, Discord недоступен! Проверь, может провайдер лежит. Я на связи."
                 notify("Лия: \"коть\"", text)
                 mark_sent(day, key)
-                status = "OK" if discord_ok else "DISCORD_DOWN"
-                print(f"{now:%H:%M:%S} отправлено уведомление ({key}) [{status}]", flush=True)
+                print(f"{now:%H:%M:%S} отправлено уведомление ({key})", flush=True)
             except Exception as e:
                 print(f"{now:%H:%M:%S} ОШИБКА уведомления ({key}): {e}", flush=True)
         time.sleep(30)
