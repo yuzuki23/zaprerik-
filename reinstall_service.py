@@ -9,6 +9,9 @@
 
 В 5.0.8 активная стратегия читается из config.json (поле strategy), а не
 жёстко из general.bat — при падении winws восстанавливается именно она.
+
+In 6.0.1 весь запускаемый код перенесён под if __name__ == "__main__": импорт
+модуля больше не убивает winws и не трогает службу.
 """
 import json
 import subprocess
@@ -38,40 +41,39 @@ def pick_active_bat():
     return BASE / "general.bat"
 
 
-BAT = pick_active_bat()
+def build_binpath():
+    """Собирает binPath службы из аргументов активной стратегии.
 
-text = BAT.read_text(encoding="utf-8", errors="replace")
-# Собираем только реальные аргументы winws: строки, начинающиеся с "--"
-# после вызова "%BIN%winws.exe", до первого комментария/FALLBACK-блока.
-marker = '"%BIN%winws.exe"'
-found = False
-args_parts = []
-for raw in text.splitlines():
-    s = raw.strip()
+    Берутся только реальные аргументы winws: строки, начинающиеся с "--"
+    после вызова "%BIN%winws.exe", до первого комментария/FALLBACK-блока.
+    Возвращает (имя-стратегии, binpath).
+    """
+    bat = pick_active_bat()
+    text = bat.read_text(encoding="utf-8", errors="replace")
+    marker = '"%BIN%winws.exe"'
+    found = False
+    args_parts = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not found:
+            if marker in s and (s.startswith("start") or s.startswith('"%BIN%winws.exe"')):
+                tail = s.split(marker, 1)[1].strip()
+                if tail:
+                    args_parts.append(tail)
+                found = True
+            continue
+        if s.startswith("--"):
+            args_parts.append(s.rstrip("^").strip())
+        elif s.startswith("::") or s.startswith("timeout"):
+            break
     if not found:
-        if marker in s and (s.startswith("start") or s.startswith('"%BIN%winws.exe"')):
-            tail = s.split(marker, 1)[1].strip()
-            if tail:
-                args_parts.append(tail)
-            found = True
-        continue
-    if s.startswith("--"):
-        args_parts.append(s.rstrip("^").strip())
-    elif s.startswith("::") or s.startswith("timeout"):
-        break
-if not found:
-    print(f"Не найден вызов winws.exe в {BAT.name}")
-    sys.exit(1)
-args = " ".join(args_parts).strip()
-args = args.replace("%BIN%", str(BASE / "bin") + "\\")
-args = args.replace("%LISTS%", str(LISTS) + "\\")
-args = args.replace("%GameFilterTCP%", GAME_TCP)
-args = args.replace("%GameFilterUDP%", GAME_UDP)
-
-binpath = '"' + str(WINWS) + '" ' + args
-print(f"Активная стратегия: {BAT.name}")
-print("BINPATH length:", len(binpath))
-print(binpath[:200], "...")
+        raise RuntimeError(f"Не найден вызов winws.exe в {bat.name}")
+    args = " ".join(args_parts).strip()
+    args = args.replace("%BIN%", str(BASE / "bin") + "\\")
+    args = args.replace("%LISTS%", str(LISTS) + "\\")
+    args = args.replace("%GameFilterTCP%", GAME_TCP)
+    args = args.replace("%GameFilterUDP%", GAME_UDP)
+    return bat.name, '"' + str(WINWS) + '" ' + args
 
 
 def run(cmd):
@@ -89,43 +91,53 @@ def norm(p):
     return p.replace('"', '').strip()
 
 
-# убиваем автономный winws (если есть), чтобы не конфликтовал со службой
-try:
-    subprocess.run(["taskkill", "/F", "/IM", "winws.exe"], capture_output=True, text=True, timeout=20)
-    print("taskkill winws -> ok")
-except Exception as e:
-    print("taskkill winws EXC", e)
+def main():
+    bat_name, binpath = build_binpath()
+    print("Активная стратегия:", bat_name)
+    print("BINPATH length:", len(binpath))
+    print(binpath[:200], "...")
 
-# Проверяем, существует ли служба и совпадает ли binPath
-need_recreate = True
-rq = run(["sc.exe", "query", "zapret"])
-if rq is not None and rq.returncode == 0 and "STATE" in rq.stdout:
-    qc = run(["sc.exe", "qc", "zapret"])
-    existing = ""
-    if qc is not None:
-        for ln in qc.stdout.splitlines():
-            if "BINARY_PATH_NAME" in ln:
-                existing = ln.split(":", 1)[-1].strip()
-    if existing and norm(existing) == norm(binpath):
-        print("Служба уже существует с корректным binPath — пересоздание не требуется")
-        need_recreate = False
+    # убиваем автономный winws (если есть), чтобы не конфликтовал со службой
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "winws.exe"], capture_output=True, text=True, timeout=20)
+        print("taskkill winws -> ok")
+    except Exception as e:
+        print("taskkill winws EXC", e)
+
+    # Проверяем, существует ли служба и совпадает ли binPath
+    need_recreate = True
+    rq = run(["sc.exe", "query", "zapret"])
+    if rq is not None and rq.returncode == 0 and "STATE" in rq.stdout:
+        qc = run(["sc.exe", "qc", "zapret"])
+        existing = ""
+        if qc is not None:
+            for ln in qc.stdout.splitlines():
+                if "BINARY_PATH_NAME" in ln:
+                    existing = ln.split(":", 1)[-1].strip()
+        if existing and norm(existing) == norm(binpath):
+            print("Служба уже существует с корректным binPath — пересоздание не требуется")
+            need_recreate = False
+        else:
+            print("Служба есть, но binPath отличается — пересоздаю")
     else:
-        print("Служба есть, но binPath отличается — пересоздаю")
-else:
-    print("Служба отсутствует — создаю")
+        print("Служба отсутствует — создаю")
 
-if need_recreate:
-    run(["sc.exe", "stop", "zapret"])
-    run(["sc.exe", "delete", "zapret"])
-    r = run(["sc.exe", "create", "zapret", "binPath=", binpath,
-             "DisplayName=", "zapret", "start=", "auto"])
-    if r is None or r.returncode != 0:
-        print("CREATE FAIL — выход")
-        sys.exit(1)
-else:
-    print("Пропускаем sc create (служба в порядке)")
+    if need_recreate:
+        run(["sc.exe", "stop", "zapret"])
+        run(["sc.exe", "delete", "zapret"])
+        r = run(["sc.exe", "create", "zapret", "binPath=", binpath,
+                 "DisplayName=", "zapret", "start=", "auto"])
+        if r is None or r.returncode != 0:
+            print("CREATE FAIL — выход")
+            sys.exit(1)
+    else:
+        print("Пропускаем sc create (служба в порядке)")
 
-r2 = run(["sc.exe", "start", "zapret"])
-print("START ->", r2.returncode if r2 else "none",
-      (r2.stdout.strip()[:200] if r2 else ""),
-      (r2.stderr.strip()[:200] if r2 else ""))
+    r2 = run(["sc.exe", "start", "zapret"])
+    print("START ->", r2.returncode if r2 else "none",
+          (r2.stdout.strip()[:200] if r2 else ""),
+          (r2.stderr.strip()[:200] if r2 else ""))
+
+
+if __name__ == "__main__":
+    main()
