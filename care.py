@@ -83,7 +83,7 @@ def log_event(msg):
         pass
 
 # Версия из config.json (единый источник), fallback на случай битого config.
-_APP_VERSION = "6.0.3"
+_APP_VERSION = "6.0.4"
 try:
     import json as _json
     import re as _re

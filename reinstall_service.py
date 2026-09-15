@@ -14,11 +14,14 @@ In 6.0.1 весь запускаемый код перенесён под if __n
 модуля больше не убивает winws и не трогает службу.
 """
 import json
+import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 BASE = Path(r"C:\запрет")
+LOG = BASE / "reinstall.log"
 WINWS = BASE / "bin" / "winws.exe"
 LISTS = BASE / "lists"
 GAME_TCP = "12"   # game-фильтр выключен
@@ -87,8 +90,36 @@ def run(cmd):
         return None
 
 
+def log_line(msg):
+    """Дублирует вывод в reinstall.log — сторож запускает скрипт с
+    capture_output, поэтому stdout иначе не виден при диагностике."""
+    try:
+        with LOG.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+    except Exception:
+        pass
+
+
 def norm(p):
     return p.replace('"', '').strip()
+
+
+def canonical_binpath(p):
+    """Канонический вид binPath для сравнения.
+
+    winws понимает и «--flag=value», и «--flag value», а sc qc может вернуть
+    одну форму, а build_binpath — другую. Приводим обе к единому виду
+    («--flag value»), чтобы reinstall не пересоздавал работающую службу
+    из-за чисто синтаксического расхождения (и не рвал WinDivert/winws).
+    """
+    out = []
+    for t in norm(p).split():
+        if t.startswith("--") and "=" in t and re.fullmatch(r"--[\w:-]+=.+", t):
+            flag, val = t.split("=", 1)
+            out.append(flag + " " + val)
+        else:
+            out.append(t)
+    return " ".join(out)
 
 
 def main():
@@ -108,19 +139,29 @@ def main():
     need_recreate = True
     rq = run(["sc.exe", "query", "zapret"])
     if rq is not None and rq.returncode == 0 and "STATE" in rq.stdout:
+        state_line = next((l for l in rq.stdout.splitlines() if "STATE" in l), "")
+        # ХОТФИКС: работающую службу НЕ трогаем даже при расхождении binPath —
+        # пересоздание выгружает WinDivert и валит живой обход.
+        if "RUNNING" in state_line:
+            print("Служба zapret уже РАБОТАЕТ — не трогаю (пересоздание = сброс WinDivert)")
+            log_line("Служба zapret RUNNING — выход без изменений")
+            return
         qc = run(["sc.exe", "qc", "zapret"])
         existing = ""
         if qc is not None:
             for ln in qc.stdout.splitlines():
                 if "BINARY_PATH_NAME" in ln:
                     existing = ln.split(":", 1)[-1].strip()
-        if existing and norm(existing) == norm(binpath):
+        if existing and canonical_binpath(existing) == canonical_binpath(binpath):
             print("Служба уже существует с корректным binPath — пересоздание не требуется")
+            log_line("Служба существует, binPath совпадает — пересоздание не требуется")
             need_recreate = False
         else:
             print("Служба есть, но binPath отличается — пересоздаю")
+            log_line(f"Пересоздание: binPath отличается. Существующий: {canonical_binpath(existing)[:120]!r} vs новый: {canonical_binpath(binpath)[:120]!r}")
     else:
         print("Служба отсутствует — создаю")
+        log_line("Служба отсутствует — создаю")
 
     if need_recreate:
         run(["sc.exe", "stop", "zapret"])
