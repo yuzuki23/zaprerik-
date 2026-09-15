@@ -67,11 +67,23 @@ SLOTS["22:00"] = list(_NIGHT)
 
 SENT = Path(r"C:\запрет\care_sent.txt")
 REPORTS = Path(r"C:\запрет\reports.md")
+LOG = Path(r"C:\запрет\care.log")
 MAX_LOG_SIZE = 512 * 1024  # 512 КБ
 KEEP_LOGS = 3
 
+
+def log_event(msg):
+    """Пишет событие (отправку/ошибку) в care.log — для диагностики,
+    почему слоты будильника иногда пропадают (stdout care не виден)."""
+    try:
+        with LOG.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+        rotate(LOG)
+    except Exception:
+        pass
+
 # Версия из config.json (единый источник), fallback на случай битого config.
-_APP_VERSION = "6.0.2"
+_APP_VERSION = "6.0.3"
 try:
     import json as _json
     import re as _re
@@ -142,7 +154,7 @@ def morning_report(day):
         if text in content:
             return  # уже записано — не дублируем
         with REPORTS.open("a", encoding="utf-8") as f:
-            f.write(text + "\n")
+            f.write("\n" + text + "\n")
     except Exception:
         pass
 
@@ -152,8 +164,12 @@ def main():
     last_day = None
     while True:
         now = datetime.now()
-        key = now.strftime("%H:%M")
         day = now.strftime("%Y-%m-%d")
+        # Слот «ЧЧ:00» доставляется в течение 20 минут после начала часа.
+        # Раньше слот терялся навсегда, если care стартовал после точного
+        # «ЧЧ:00» (например, после перезапуска сторожа в ЧЧ:18) — из-за этого
+        # пропадали утренние уведомления.
+        key = now.strftime("%H:00") if now.minute <= 20 else now.strftime("%H:%M")
         # Раз в день (утром, до слотов) пишем отчёт о вчерашнем дне
         if day != last_day:
             last_day = day
@@ -162,6 +178,7 @@ def main():
                 yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
                 morning_report(yesterday)
                 print(f"{now:%H:%M:%S} утренний отчёт за {yesterday} записан", flush=True)
+                log_event(f"Утренний отчёт за {yesterday} записан")
         if key in SLOTS and not already_sent(day, key):
             try:
                 phrases = SLOTS[key]
@@ -169,8 +186,10 @@ def main():
                 notify("Лия: \"коть\"", text)
                 mark_sent(day, key)
                 print(f"{now:%H:%M:%S} отправлено уведомление ({key})", flush=True)
+                log_event(f"Отправлено уведомление {day} {key}")
             except Exception as e:
-                print(f"{now:%H:%M:%S} ОШИБКА уведомления ({key}): {e}", flush=True)
+                print(f"{now:%H:%M:%S} ОШИБКА уведомления ({key}): {e!r}", flush=True)
+                log_event(f"ОШИБКА уведомления {day} {key}: {e!r}")
         time.sleep(30)
 
 

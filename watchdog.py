@@ -47,7 +47,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "6.0.2",
+        "version": "6.0.3",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -138,8 +138,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.2")
-    CFG["version"] = "6.0.2"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.3")
+    CFG["version"] = "6.0.3"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -154,8 +154,20 @@ VERIFY_SLEEP = CFG["winws"]["verification_sleep_sec"]
 ROTATE_BY_DATE = CFG["logs"]["rotate_by_date"]
 
 # Самоперезапуск сторожа при изменении его собственного кода.
+# Следим за СОДЕРЖИМЫМ (sha256), а не за mtime: антивирус или копирование
+# могут менять время файла без изменения кода — это вызывало лишние
+# самоперезапуски сторожа (и потерю утренних слотов будильника).
 WATCHDOG_SELF = BASE_DIR / "watchdog.py"
-WATCHDOG_SELF_MTIME = WATCHDOG_SELF.stat().st_mtime
+
+
+def _self_hash():
+    try:
+        return hashlib.sha256(WATCHDOG_SELF.read_bytes()).hexdigest()
+    except Exception:
+        return None
+
+
+WATCHDOG_SELF_HASH = _self_hash()
 
 # Процессы под надзором: имя -> (скрипт, аргументы, частота перезапуска при сбое)
 WATCHED = [
@@ -298,7 +310,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "6.0.2"),
+        "version": CFG.get("version", "6.0.3"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -653,7 +665,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '6.0.2')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '6.0.3')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -666,9 +678,11 @@ def _run():
     cycle = 0
 
     while True:
-        # сам перезапуск, если изменился собственный код сторожа
+        # сам перезапуск, если изменился собственный код сторожа (по хэшу)
         try:
-            if WATCHDOG_SELF.stat().st_mtime != WATCHDOG_SELF_MTIME:
+            cur_hash = _self_hash()
+            if cur_hash is not None and cur_hash != WATCHDOG_SELF_HASH:
+                log("Обнаружено изменение watchdog.py — самоперезапуск для подхвата нового кода")
                 self_restart()
         except Exception:
             pass
@@ -784,4 +798,12 @@ def _run():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        try:
+            log("КРИТИЧЕСКИЙ СБОЙ СТОРОЖА:\n" + traceback.format_exc())
+        except Exception:
+            pass
+        raise
