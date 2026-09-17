@@ -639,34 +639,14 @@ def rotate_by_lines(path: Path, max_lines=2000, keep_lines=500):
         pass
 
 
-def restart_via_task():
-    """Перезапускает сторож через Планировщик задач и выходит.
-
-    Задача ZapretikWatchdog имеет RunLevel=HighestAvailable, поэтому её запуск
-    даёт сторожу права админа без UAC-окна. Используется, когда сторож
-    стартовал без прав (напр., через keepalive с обычным токеном): такой
-    экземпляр не может sc start zapret и писал бы «UAC sc start».
-    Возвращает True, если перезапуск через планировщик успешно запрошен.
-    """
-    try:
-        log("Сторож запущен без прав админа — перезапуск через Планировщик (ZapretikWatchdog)")
-        r = subprocess.run(["schtasks", "/Run", "/TN", "ZapretikWatchdog"],
-                           capture_output=True, text=True, timeout=20, creationflags=NO_WINDOW)
-        ok = r.returncode == 0
-        log(f"schtasks /Run -> {'OK' if ok else f'{r.returncode}: {r.stdout.strip()[:100]}'}")
-        return ok
-    except Exception as exc:
-        log(f"ОШИБКА перезапуска через Планировщик: {exc}")
-        return False
-
-
 def main():
     if not is_admin():
-        # без прав админа сторож не поднимет службу — перезапускаемся через
-        # задачу ZapretikWatchdog (HighestAvailable) и даём новой копии старт
-        restart_via_task()
-        time.sleep(5)
-        sys.exit(0)
+        # Задача ZapretikWatchdog при незавышенной сессии даёт не-админский
+        # токен (InteractiveToken + HighestAvailable), поэтому попытка
+        # перезапуска через планировщик зацикливается. Не выходим: работаем
+        # в «наблюдательном» режиме — статусы, логи, восстановление winws
+        # процесса. Служба zapret живёт сама, пока это возможно.
+        log("Сторож запущен БЕЗ прав админа — работаю в наблюдательном режиме (службу не пересоздаю)")
     if not acquire_lock():
         print("Watchdog уже запущен (lock-файл занят) — выход.", flush=True)
         sys.exit(0)
