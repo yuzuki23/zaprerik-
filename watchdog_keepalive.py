@@ -43,14 +43,26 @@ def watchdog_running():
     return False
 
 
-def main():
-    if watchdog_running():
+def start_watchdog():
+    """Поднимает сторож. Сначала — через Планировщик (задача ZapretikWatchdog
+    имеет HighestAvailable, поэтому сторож получает права админа без UAC);
+    если задачи нет — запасной прямой запуск pythonw (коды без прав, хуже,
+    но лучше, чем ничего)."""
+    r = subprocess.run(["schtasks", "/Run", "/TN", "ZapretikWatchdog"],
+                       capture_output=True, text=True, timeout=20, creationflags=NO_WINDOW)
+    if r.returncode == 0:
         return
     try:
         subprocess.Popen([PYTHON, str(WATCHDOG)], cwd=str(BASE),
                          creationflags=NO_WINDOW)
     except Exception:
         pass
+
+
+def main():
+    if watchdog_running():
+        return
+    start_watchdog()
 
 
 if __name__ == "__main__":

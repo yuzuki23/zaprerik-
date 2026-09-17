@@ -47,7 +47,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "6.0.5",
+        "version": "6.0.6",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -138,8 +138,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.5")
-    CFG["version"] = "6.0.5"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.6")
+    CFG["version"] = "6.0.6"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -310,7 +310,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "6.0.5"),
+        "version": CFG.get("version", "6.0.6"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -639,7 +639,34 @@ def rotate_by_lines(path: Path, max_lines=2000, keep_lines=500):
         pass
 
 
+def restart_via_task():
+    """Перезапускает сторож через Планировщик задач и выходит.
+
+    Задача ZapretikWatchdog имеет RunLevel=HighestAvailable, поэтому её запуск
+    даёт сторожу права админа без UAC-окна. Используется, когда сторож
+    стартовал без прав (напр., через keepalive с обычным токеном): такой
+    экземпляр не может sc start zapret и писал бы «UAC sc start».
+    Возвращает True, если перезапуск через планировщик успешно запрошен.
+    """
+    try:
+        log("Сторож запущен без прав админа — перезапуск через Планировщик (ZapretikWatchdog)")
+        r = subprocess.run(["schtasks", "/Run", "/TN", "ZapretikWatchdog"],
+                           capture_output=True, text=True, timeout=20, creationflags=NO_WINDOW)
+        ok = r.returncode == 0
+        log(f"schtasks /Run -> {'OK' if ok else f'{r.returncode}: {r.stdout.strip()[:100]}'}")
+        return ok
+    except Exception as exc:
+        log(f"ОШИБКА перезапуска через Планировщик: {exc}")
+        return False
+
+
 def main():
+    if not is_admin():
+        # без прав админа сторож не поднимет службу — перезапускаемся через
+        # задачу ZapretikWatchdog (HighestAvailable) и даём новой копии старт
+        restart_via_task()
+        time.sleep(5)
+        sys.exit(0)
     if not acquire_lock():
         print("Watchdog уже запущен (lock-файл занят) — выход.", flush=True)
         sys.exit(0)
@@ -689,7 +716,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '6.0.5')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '6.0.6')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -701,6 +728,15 @@ def _run():
     procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
     procs["winws"] = winws_pid()
     write_status("running", {"processes": procs})
+    # winws (служба) может подниматься с задержкой — повторный опрос, чтобы
+    # в свежем status.json стоял реальный PID, а не первый None.
+    for _ in range(3):
+        if procs["winws"] is not None:
+            break
+        time.sleep(3)
+        procs["winws"] = winws_pid()
+        if procs["winws"] is not None:
+            write_status("running", {"processes": procs})
     cycle = 0
 
     while True:
