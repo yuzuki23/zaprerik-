@@ -76,6 +76,12 @@ VOICE_WS_HOST = "gateway.discord.gg"
 VOICE_WS_PORT = 443
 VOICE_WS_PATH = "/?v=4&encoding=json"
 
+# Retry голосового хендшейка: DPI провайдера иногда «душит» именно первую
+# попытку (ERR _ssl.c:993 handshake timeout), а повторная почти всегда проходит.
+# ERR попадает в лог только если не открылся ни с одной из попыток.
+VOICE_RETRIES = 2
+VOICE_RETRY_DELAY = 3  # сек между попытками
+
 # Защита от флапа: не перезапускаем службу чаще раза в это время (сек).
 RESTART_COOLDOWN = 10 * 60
 LAST_RESTART_TS = 0.0  # время последнего реального перезапуска (epoch)
@@ -194,14 +200,8 @@ def check_detector():
     return "ERR", DETECTORS[0]
 
 
-def check_voice_ws():
-    """Реальная проверка голосового пути: WebSocket-хендшейк до шлюза Discord.
-
-    DPI нередко режет именно WebSocket (голос/видео в Discord), оставляя обычный
-    HTTPS живым — поэтому штатный пинг discord.com этого не ловит. Делаем минимальный
-    WS-апгрейд до wss://gateway.discord.gg и ждём ответ 101 Switching Protocols.
-    Возвращает 'OK' (путь открыт) или 'ERR <причина>'.
-    """
+def _voice_probe_once():
+    """Одна попытка WebSocket-хендшейка до шлюза Discord. Возвращает 'OK' или 'ERR <причина>'."""
     try:
         import base64 as _b64
         import ssl as _ssl
@@ -235,6 +235,27 @@ def check_voice_ws():
         return "ERR " + status_line
     except Exception as exc:
         return f"ERR {exc}"
+
+
+def check_voice_ws():
+    """Реальная проверка голосового пути: WebSocket-хендшейк до шлюза Discord.
+
+    DPI нередко режет именно WebSocket (голос/видео в Discord), оставляя обычный
+    HTTPS живым — поэтому штатный пинг discord.com этого не ловит. Делаем минимальный
+    WS-апгрейд до wss://gateway.discord.gg и ждём ответ 101 Switching Protocols.
+    При неудаче повторяем попытку (плавающий DPI-таймаут рукопожатия), чтобы в лог
+    попадал только уверенный отказ.
+    Возвращает 'OK' (путь открыт) или 'ERR <причина>'.
+    """
+    last_err = ""
+    for attempt in range(VOICE_RETRIES):
+        if attempt:
+            time.sleep(VOICE_RETRY_DELAY)
+        res = _voice_probe_once()
+        if res == "OK":
+            return "OK"
+        last_err = res
+    return last_err
 
 
 def retry_resolve(discord_url, gateway_url):

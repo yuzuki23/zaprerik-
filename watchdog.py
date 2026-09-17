@@ -47,7 +47,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "6.0.4",
+        "version": "6.0.5",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -138,8 +138,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.4")
-    CFG["version"] = "6.0.4"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.5")
+    CFG["version"] = "6.0.5"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -310,7 +310,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "6.0.4"),
+        "version": CFG.get("version", "6.0.5"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -467,6 +467,30 @@ def monitor_last_activity():
         except Exception:
             pass
     return best
+
+
+def monitor_silence_diagnosis():
+    """Что моник успел сделать до того, как замолчал (для отладки зависаний).
+
+    Возвращает строку с временем последней активности и последней строкой лога —
+    чтобы понять, где моник «застрял» (на какой проверке/эндпоинте).
+    """
+    try:
+        last = monitor_last_activity()
+        if last is None:
+            return "файлов активности не найдено"
+        stamp = datetime.fromtimestamp(last).strftime("%Y-%m-%d %H:%M:%S")
+        tail = ""
+        try:
+            with MONITOR_LOG.open("r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            if lines:
+                tail = lines[-1].strip()[-220:]
+        except Exception:
+            pass
+        return f"последняя активность {stamp}, последняя строка лога: {tail!r}"
+    except Exception as exc:
+        return f"ошибка диагностики: {exc}"
 
 
 def start_zapret():
@@ -665,7 +689,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '6.0.4')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '6.0.5')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -674,7 +698,9 @@ def _run():
         entry["down_since"] = None
         time.sleep(1)
 
-    write_status("running", {"processes": {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}})
+    procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
+    procs["winws"] = winws_pid()
+    write_status("running", {"processes": procs})
     cycle = 0
 
     while True:
@@ -713,7 +739,8 @@ def _run():
                 if last is not None:
                     idle = time.time() - last
                     if idle > LIVENESS_TIMEOUT:
-                        log(f"МОНИК ЗАВИС (молчит {int(idle // 60)} мин при живом процессе) — принудительный перезапуск")
+                        diag = monitor_silence_diagnosis()
+                        log(f"МОНИК ЗАВИС (молчит {int(idle // 60)} мин при живом процессе; {diag}) — принудительный перезапуск")
                         try:
                             proc.terminate()
                         except Exception:
