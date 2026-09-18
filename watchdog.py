@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -47,7 +48,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "6.0.6",
+        "version": "6.0.7",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -138,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.6")
-    CFG["version"] = "6.0.6"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.7")
+    CFG["version"] = "6.0.7"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -310,7 +311,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "6.0.6"),
+        "version": CFG.get("version", "6.0.7"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -493,9 +494,41 @@ def monitor_silence_diagnosis():
         return f"ошибка диагностики: {exc}"
 
 
+def _start_winws_process():
+    """Запускает winws.exe напрямую как процесс (без службы и прав админа).
+
+    Используется когда нет прав админа — сторож не может ни sc start, ни
+    пересоздать службу. Собирает аргументы из активной стратегии (как
+    reinstall_service.build_binpath) и запускает winws процессом. Возвращает
+    True, если winws реально появился в тасклисте."""
+    try:
+        import reinstall_service as rs
+        name, binpath = rs.build_binpath()
+        wins = shlex.split(binpath)
+    except Exception as exc:
+        log(f"НЕ удалось собрать команду winws из стратегии: {exc}")
+        return False
+    log(f"winws процессом (стратегия {name}): права админа не нужны")
+    try:
+        subprocess.Popen(wins, cwd=str(WINWS.parent), creationflags=NO_WINDOW)
+    except Exception as exc:
+        log(f"ОШИБКА запуска winws процессом: {exc}")
+        return False
+    for _ in range(max(3, VERIFY_ATTEMPTS)):
+        if winws_up():
+            return True
+        time.sleep(VERIFY_SLEEP)
+    return winws_up()
+
+
 def start_zapret():
     """Поднимает службу zapret (winws). Если служба отсутствует — пересоздаёт её.
-    Возвращает True, если winws реально поднялся (проверено опросом STATE/RUNNING)."""
+    Возвращает True, если winws реально поднялся (проверено опросом STATE/RUNNING).
+
+    Без прав админа (наблюдательный режим) службу/sc не трогаем — запускаем
+    winws.exe напрямую процессом из активной стратегии."""
+    if not is_admin():
+        return _start_winws_process()
     try:
         if not service_exists():
             log("Служба zapret отсутствует — пересоздаю через reinstall_service.py")
@@ -505,16 +538,9 @@ def start_zapret():
                                creationflags=NO_WINDOW)
             except Exception as e:
                 log(f"ОШИБКА пересоздания службы: {e}")
-        if is_admin():
-            r = subprocess.run(["sc", "start", "zapret"], capture_output=True, text=True,
-                               timeout=30, creationflags=NO_WINDOW)
-            msg = "sc start" if r.returncode == 0 else f"sc start -> {r.returncode}"
-        else:
-            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
-                              "-Command", "Start-Process 'sc.exe' -ArgumentList 'start','zapret' -Verb RunAs"],
-                             creationflags=NO_WINDOW)
-            msg = "UAC sc start"
-        log(f"Поднятие winws: {msg}")
+        r = subprocess.run(["sc", "start", "zapret"], capture_output=True, text=True,
+                           timeout=30, creationflags=NO_WINDOW)
+        log("Поднятие winws: " + ("sc start" if r.returncode == 0 else f"sc start -> {r.returncode}"))
     except Exception as exc:
         log(f"ОШИБКА поднятия winws: {exc}")
         return False
@@ -696,7 +722,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '6.0.6')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '6.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
