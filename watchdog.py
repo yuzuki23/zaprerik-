@@ -48,7 +48,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "6.0.7",
+        "version": "6.0.8",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.7")
-    CFG["version"] = "6.0.7"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 6.0.8")
+    CFG["version"] = "6.0.8"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -179,8 +179,11 @@ WATCHED = [
 # Heartbeat-живость моника
 MONITOR_LOG = BASE_DIR / "discord_monitor.log"
 
-# Singleton: не даём запуститься второму экземпляру watchdog
-LOCK_FILE = Path(os.environ.get("TEMP", str(BASE_DIR))) / "zapretik_watchdog.lock"
+# Singleton: не даём запуститься второму экземпляру watchdog.
+# Единый фиксированный путь в BASE_DIR (НЕ в TEMP!): процессы имеют разное
+# окружение (сторож из сессии, keeper из Планировщика) и разные TEMP —
+# из-за этого keeper не видел живой сторож и не мог его поднять.
+LOCK_FILE = BASE_DIR / "zapretik_watchdog.lock"
 
 # Глобальное состояние winws (вынесено до main)
 entry_up = {"last_down": None}
@@ -311,7 +314,7 @@ def log(msg):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "6.0.7"),
+        "version": CFG.get("version", "6.0.8"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -722,7 +725,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '6.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '6.0.8')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()

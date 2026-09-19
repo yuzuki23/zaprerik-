@@ -234,3 +234,7 @@ discord_status.txt
 
 # РЎРµСЃСЃРёСЏ Playwright (РЅРµ РєРѕРјРјРёС‚РёС‚СЊ!)
 .gitverse_session/
+
+# Lock-файл сторожа (теперь в базе, не в TEMP)
+zapretik_watchdog.lock
+
