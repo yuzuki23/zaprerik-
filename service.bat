@@ -1,5 +1,9 @@
 @echo off
-set "LOCAL_VERSION=11.0.4"
+
+:: Читаем версию из config.json (единый источник)
+set "LOCAL_VERSION="
+for /f "delims=" %%V in ('powershell -NoProfile -Command "try { $c=Get-Content -LiteralPath '%~dp0config.json' -Raw -ErrorAction Stop; ($c|ConvertFrom-Json).version } catch {}" 2^>nul') do if not "%%V"=="" set "LOCAL_VERSION=%%V"
+if not defined LOCAL_VERSION set "LOCAL_VERSION=unknown"
 
 :: Проверка наличия Python
 where python >nul 2>nul

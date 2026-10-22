@@ -1,0 +1,23 @@
+{
+  "version": "11.0.4",
+  "strategy": "general (ALT)",
+  "watchdog": {
+    "daily_restart_hour": 4,
+    "liveness_timeout_sec": 360,
+    "cycle_sleep_sec": 10,
+    "memory_check_interval": 60,
+    "max_log_lines": 2000,
+    "keep_log_lines": 500
+  },
+  "winws": {
+    "restart_delay_sec": 45,
+    "verification_attempts": 10,
+    "verification_sleep_sec": 2
+  },
+  "logs": {
+    "rotate_by_date": true,
+    "max_size_mb": 5,
+    "backup_count": 3,
+    "keep_days": 14
+  }
+}

@@ -2,12 +2,13 @@
 """Повышение версии Zapretik.
 
 Единый источник версии — config.json. Этот скрипт при выпуске новой версии
-обновляет config.json и все зависимые файлы (version.txt, service.bat,
-fallback внутри watchdog.py):
+обновляет config.json и все зависимые файлы (version.txt, fallback внутри
+watchdog.py):
 
     python bump_version.py 5.0.5
 
-main.py и care.py читают версию прямо из config.json в рантайме, их править не нужно.
+service.bat читает версию из config.json динамически, его править не нужно.
+main.py и care.py читают версию прямо из config.json в рантайме.
 """
 import json
 import os
@@ -55,16 +56,7 @@ def bump(new_ver: str):
     # .service/version.txt
     atomic_write_text(PROJ / ".service" / "version.txt", new_ver + "\n")
 
-    # service.bat
-    sb = PROJ / "service.bat"
-    atomic_write_text(
-        sb,
-        re.sub(
-            r'set "LOCAL_VERSION=[^"]+"',
-            f'set "LOCAL_VERSION={new_ver}"',
-            sb.read_text(encoding="utf-8"),
-        ),
-    )
+    # service.bat больше не обновляем — он читает версию из config.json динамически
 
     # fallback-значения версии (если config битый) в watchdog.py, main.py, care.py
     if version_ok(old) and old != new_ver:
@@ -72,7 +64,7 @@ def bump(new_ver: str):
             p = PROJ / name
             atomic_write_text(p, p.read_text(encoding="utf-8").replace(old, new_ver))
 
-    print(f"Версия {old or '(отсутствует)'} -> {new_ver} обновлена: config.json, .service/version.txt, service.bat, watchdog.py, main.py, care.py")
+    print(f"Версия {old or '(отсутствует)'} -> {new_ver} обновлена: config.json, .service/version.txt, watchdog.py, main.py, care.py")
 
 
 if __name__ == "__main__":
