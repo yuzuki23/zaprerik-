@@ -82,8 +82,8 @@ def log_event(msg):
     except Exception:
         pass
 
-# Версия из config.json (единый источник), fallback на случай битого config.
-_APP_VERSION = "6.0.8"
+# Версия из config.json (единый источник).
+_APP_VERSION = "11.0.3"
 try:
     import json as _json
     import re as _re
@@ -139,9 +139,10 @@ def mark_sent(day, slot):
 def morning_report(day):
     """Утренний отчёт в дневник: сколько слотов вчера отправлено будильником.
 
-    Идемпотентен: если отчёт за этот день уже есть в дневнике — не дублируем
-    (защита на случай повторного запуска care.py или перезапуска сторожа,
-    из-за которого раньше появлялись две одинаковые строки будильника).
+    Идемпотентен: если строка за этот день уже есть в дневнике — не дублируем
+    (защита на случай повторного запуска care.py или перезапуска сторожа).
+    Строку вставляем в секцию «## ☀️ Утро» текущего дня, а не в конец файла:
+    утренние записи переписываются с нуля, и строка в хвосте терялась.
     """
     rotate(SENT)
     if not SENT.exists():
@@ -153,8 +154,16 @@ def morning_report(day):
         content = REPORTS.read_text(encoding="utf-8") if REPORTS.exists() else ""
         if text in content:
             return  # уже записано — не дублируем
-        with REPORTS.open("a", encoding="utf-8") as f:
-            f.write("\n" + text + "\n")
+        head = "## ☀️ Утро"
+        i = content.find(head)
+        if i >= 0:
+            nl = content.find("\n", i)
+            if nl >= 0:
+                content = content[:nl] + "\n" + text + content[nl:]
+        else:
+            content += "\n" + text + "\n"
+        with REPORTS.open("w", encoding="utf-8") as f:
+            f.write(content)
     except Exception:
         pass
 
@@ -169,7 +178,17 @@ def main():
         # Раньше слот терялся навсегда, если care стартовал после точного
         # «ЧЧ:00» (например, после перезапуска сторожа в ЧЧ:18) — из-за этого
         # пропадали утренние уведомления.
-        key = now.strftime("%H:00") if now.minute <= 20 else now.strftime("%H:%M")
+        # Фикс: если current minute > 20, проверяем, не был ли слот пропущен
+        # и не нужно ли его доставить в течение следующих 10 минут.
+        minute = now.minute
+        if minute <= 20:
+            key = now.strftime("%H:00")
+        elif minute <= 30:
+            # Пропущенный слот: доставляем в течение 10 мин после :20
+            prev_hour = now.hour - 1 if now.hour > 0 else 23
+            key = f"{prev_hour:02d}:00"
+        else:
+            key = now.strftime("%H:%M")
         # Раз в день (утром, до слотов) пишем отчёт о вчерашнем дне
         if day != last_day:
             last_day = day
@@ -182,7 +201,9 @@ def main():
         if key in SLOTS and not already_sent(day, key):
             try:
                 phrases = SLOTS[key]
-                text = phrases[len(str(int(now.timestamp()))) % len(phrases)]
+                # Детерминированный выбор фразы по дате и часу
+                phrase_seed = hash(f"{day}_{key}") & 0xFFFFFFFF
+                text = phrases[phrase_seed % len(phrases)]
                 notify("Лия: \"коть\"", text)
                 mark_sent(day, key)
                 print(f"{now:%H:%M:%S} отправлено уведомление ({key})", flush=True)

@@ -17,6 +17,9 @@ NO_WINDOW = 0x08000000
 
 
 def http(url, timeout=12):
+    import shutil
+    if not shutil.which("curl.exe"):
+        return "ERR curl.exe not in PATH"
     try:
         r = subprocess.run(
             ["curl.exe", "-s", "-o", "NUL", "-w", "%{http_code}",
