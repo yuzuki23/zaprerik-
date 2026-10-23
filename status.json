@@ -1,10 +1,10 @@
 {
-  "version": "11.0.4",
-  "timestamp": "2026-10-22T20:17:40.065329",
+  "version": "11.0.6",
+  "timestamp": "2026-10-23T14:00:09.761925",
   "status": "running",
   "processes": {
-    "care": 12952,
-    "monitor": 10488,
-    "winws": 4904
+    "care": 1388,
+    "monitor": 22932,
+    "winws": 4608
   }
 }

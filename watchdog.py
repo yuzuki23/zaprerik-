@@ -48,7 +48,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "11.0.5",
+        "version": "11.0.6",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.5")
-    CFG["version"] = "11.0.5"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.6")
+    CFG["version"] = "11.0.6"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -319,18 +319,35 @@ def log(msg):
         f.write(line + "\n")
 
 
+def _atomic_write_json(path, data):
+    """Атомарная запись JSON: временный файл + os.replace.
+
+    open(..., "w") сначала обнуляет файл и только потом пишет данные —
+    если процесс убит в этот момент, файл остаётся пустым (баг 11.0.6:
+    config.json обнулился при смене стратегии). os.replace атомарен на
+    Windows: файл заменяется целиком, читатель всегда видит либо старую,
+    либо новую версию.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "11.0.5"),
+        "version": CFG.get("version", "11.0.6"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
     if details:
         data.update(details)
     try:
-        with open(STATUS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(STATUS_FILE, data)
     except Exception:
         pass
 
@@ -350,9 +367,7 @@ def update_strategy_in_config(name):
         if cfg.get("strategy") == name:
             return
         cfg["strategy"] = name
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, ensure_ascii=False, indent=2)
-            f.write("\n")
+        _atomic_write_json(CONFIG_FILE, cfg)
         log(f"Активная стратегия сохранена в config.json: {name}")
     except Exception as e:
         log(f"ОШИБКА сохранения стратегии в config.json: {e}")
@@ -733,7 +748,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '11.0.5')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '11.0.6')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()

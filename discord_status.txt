@@ -1,4 +1,4 @@
-Discord — живой статус (обновлено: 2026-09-05 13:45:14)
+Discord — живой статус (обновлено: 2026-10-23 13:58:20)
 ==========================================
 discord.com          -> 200
 gateway.discord.gg   -> 404
@@ -6,4 +6,4 @@ voice ws (голос)     ->  OK
 detector404.ru/discord -> 200
 ==========================================
 ВЕРДИКТ: ВСЁ РАБОТАЕТ
-Доп.: discordstatus.com: API=operational, indicator=none | cdn.discordapp.com -> 403 | voice_ws:OK
+Доп.: discordstatus.com: API=operational, indicator=none | cdn.discordapp.com -> 000 | voice_ws:OK

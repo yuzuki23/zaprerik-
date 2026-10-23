@@ -1,6 +1,6 @@
 {
-  "version": "11.0.5",
-  "strategy": "general (ALT)",
+  "version": "11.0.6",
+  "strategy": "general (ALT14)",
   "watchdog": {
     "daily_restart_hour": 4,
     "liveness_timeout_sec": 360,
