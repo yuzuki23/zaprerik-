@@ -48,7 +48,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "11.0.6",
+        "version": "11.0.7",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.6")
-    CFG["version"] = "11.0.6"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.7")
+    CFG["version"] = "11.0.7"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -340,7 +340,7 @@ def _atomic_write_json(path, data):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "11.0.6"),
+        "version": CFG.get("version", "11.0.7"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -378,39 +378,58 @@ def start_proc(entry):
 
     Скрипт передаётся абсолютным путём (BASE_DIR / script), чтобы перезапуск
     не зависел от cwd с кириллицей (Python сам резолвит путь через CreateProcessW).
+
+    stdout перенаправляется в ФАЙЛ <name>_out.log, а не в pipe: pipe при живом
+    процессе никто не читает (collect_output работает только после смерти) —
+    его буфер переполнялся, print() моника упирался в полный pipe и блокировался
+    навсегда. Так рождалось зависание «МОНИК ЗАВИС: живой, но молчит» (23.10 —
+    6 мин тишины, завис на print после write_status).
     """
     script = BASE_DIR / entry["script"]
     cmd = [str(PYTHON), str(script)] + entry["args"]
+    out_path = BASE_DIR / f"{entry['name']}_out.log"
+    try:
+        out_f = open(out_path, "wb")  # каждая инкарнация начинает вывод заново
+    except OSError as exc:
+        log(f"Не смогла открыть {out_path.name} для вывода {entry['name']}: {exc} — stdout в DEVNULL")
+        out_f = None
     try:
         proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
             creationflags=NO_WINDOW,
-            stdout=subprocess.PIPE,
+            stdout=out_f if out_f is not None else subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},  # вывод сразу в файл, без буфера Python
         )
         log(f"Старт {entry['name']} (PID={proc.pid}): {script}")
         return proc
     except OSError as exc:
         log(f"ОШИББКА запуска {entry['name']}: {exc}")
         return None
+    finally:
+        if out_f is not None:
+            out_f.close()  # дескриптор уже продублирован в дочерний процесс
 
 
 def collect_output(entry):
-    """Вычитывает накопившийся вывод процесса (если процесс уже умер)."""
+    """После смерти процесса — хвост его вывода (из <name>_out.log) в лог сторожа.
+
+    Вывод идёт сразу в файл (см. start_proc), поэтому здесь просто читаем
+    накопившееся — pipe больше нет, живой процесс ничем не блокируется.
+    """
     proc = entry.get("proc")
-    if proc is None or proc.stdout is None:
+    if proc is None:
         return
     if proc.poll() is None:
         return  # жив — не трогаем
     try:
-        out = proc.stdout.read()
+        text = (BASE_DIR / f"{entry['name']}_out.log").read_text(
+            encoding="utf-8", errors="replace").strip()
     except Exception:
         return
-    if out:
-        text = out.decode("utf-8", errors="replace").strip()
-        if text:
-            log(f"Вывод {entry['name']} (до падения):\n{text[:2000]}")
+    if text:
+        log(f"Вывод {entry['name']} (до падения, хвост):\n{text[-2000:]}")
 
 
 def winws_up():
@@ -599,11 +618,14 @@ planned_restart = set()
 
 
 def self_restart():
-    """Перезапускает сам сторож с новым кодом.
+    """Перезапускает сам сторож с новым кодом — через помощника watchdog_relaunch.py.
 
-    Останавливаем подопечных, запускаем свежий python watchdog.py (с флагом
-    замены ZAPRETIK_REPLACING) и выходим — новый экземпляр берёт lock и
-    поднимает все скрипты уже с обновлённым кодом.
+    Всегда используем watchdog_relaunch.py (schetasks /End → /Run), потому что
+    прямой Popen наследует токен родителя: если текущий сторож запущен без прав
+    админа (задача ZapretikWatchdog), дочерний тоже теряет права и не может
+    поднять winws (WinError 740 «запрашивается повышенный режим»). Помощник
+    делает schtasks /End → /Run — новый сторож стартует уже с правами самой
+    задачи (RunLevel), а не с potentially заниженным токеном родительского pythonw.
     """
     log("Самоперезапуск сторожа — подхват нового кода")
     for entry in WATCHED:
@@ -613,15 +635,25 @@ def self_restart():
                 proc.terminate()
             except Exception:
                 pass
+    # Всегда через помощника — он гарантирует запуск через schtasks,
+    # который подхватит права задачи (а не унаследованный токен)
     try:
         subprocess.Popen(
-            [str(PYTHON), str(WATCHDOG_SELF)],
+            [str(PYTHON), str(BASE_DIR / "watchdog_relaunch.py"), str(os.getpid())],
             cwd=str(BASE_DIR),
             creationflags=NO_WINDOW,
-            env={**os.environ, "ZAPRETIK_REPLACING": "1"},
         )
     except Exception as exc:
-        log(f"ОШИБКА самоперезапуска сторожа: {exc}")
+        log(f"ОШИБКА запуска помощника самоперезапуска: {exc} — пробую прямой Popen")
+        try:
+            subprocess.Popen(
+                [str(PYTHON), str(WATCHDOG_SELF)],
+                cwd=str(BASE_DIR),
+                creationflags=NO_WINDOW,
+                env={**os.environ, "ZAPRETIK_REPLACING": "1"},
+            )
+        except Exception as exc2:
+            log(f"ОШИБКА прямого самоперезапуска: {exc2}")
     release_lock()
     sys.exit(0)
 
@@ -748,7 +780,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '11.0.6')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '11.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -795,6 +827,15 @@ def _run():
                 else:
                     log(f"{entry['name']} всё ещё лежит (код {code}) — повторный запуск")
                 entry["proc"] = start_proc(entry)
+                # №4: сразу фиксируем новый PID в status.json, не дожидаясь
+                # очередного MEMORY_CHECK_INTERVAL — иначе файл врёт
+                # (показывает старый PID убитого процесса).
+                try:
+                    procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
+                    procs["winws"] = winws_pid()
+                    write_status("running", {"processes": procs, "cycle": cycle, "strategy": strategy_state.get("name")})
+                except Exception:
+                    pass
                 continue
             if proc is not None and entry.get("down_since") is not None:
                 log(f"{entry['name']} снова работает (PID={proc.pid})")
@@ -809,6 +850,9 @@ def _run():
                     if idle > LIVENESS_TIMEOUT:
                         diag = monitor_silence_diagnosis()
                         log(f"МОНИК ЗАВИС (молчит {int(idle // 60)} мин при живом процессе; {diag}) — принудительный перезапуск")
+                        # Своё убийство — не падение: помечаем как плановый рестарт,
+                        # иначе следующий цикл напишет ложное «ПАДЕНИЕ monitor».
+                        planned_restart.add(entry["name"])
                         try:
                             proc.terminate()
                         except Exception:
