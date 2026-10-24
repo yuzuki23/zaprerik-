@@ -88,6 +88,8 @@ LAST_RESTART_TS = 0.0  # время последнего реального пе
 
 NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — консольные дети не открывают окно (важно для pythonw)
 
+HEARTBEAT = BASE_DIR / "monitor_heartbeat.txt"  # heartbeat для watchdog
+
 MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 МБ
 KEEP_LOGS = 3
 RESTART_AFTER_FAILS = 3  # после стольких «настоящих» сбоев подряд — перезапускаем zapret
@@ -399,6 +401,12 @@ def main():
     was_down = False
     fail_streak = 0  # подряд идущие «настоящие» сбои (маршрутная блокировка)
     while True:
+        # Heartbeat: обновляем файл, чтобы watchdog видел, что монитор жив
+        # (даже если застрял внутри цикла на долгой проверке)
+        try:
+            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         codes = {u: http(u) for u in HEALTH_URLS}
         detector, detector_src = check_detector()

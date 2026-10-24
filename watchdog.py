@@ -48,7 +48,7 @@ sys.path.insert(0, str(BASE_DIR))
 # Загрузка конфига
 def load_config():
     defaults = {
-        "version": "11.0.7",
+        "version": "11.0.8",
         "watchdog": {
             "daily_restart_hour": 4,
             "liveness_timeout_sec": 360,
@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.7")
-    CFG["version"] = "11.0.7"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.8")
+    CFG["version"] = "11.0.8"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -340,7 +340,7 @@ def _atomic_write_json(path, data):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "11.0.7"),
+        "version": CFG.get("version", "11.0.8"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -502,9 +502,11 @@ def service_exists():
 
 
 def monitor_last_activity():
-    """Время последней записи моника (лог или файл статуса). None, если файлов нет."""
+    """Время последней записи моника (лог, heartbeat или файл статуса). None, если файлов нет."""
     best = None
-    for p in (MONITOR_LOG, BASE_DIR / "discord_status.txt"):
+    # Heartbeat — приоритетнее лога: если монитор застрял внутри цикла,
+    # лог не обновляется, но heartbeat показывает, что процесс жив
+    for p in (BASE_DIR / "monitor_heartbeat.txt", MONITOR_LOG, BASE_DIR / "discord_status.txt"):
         try:
             if p.exists():
                 m = p.stat().st_mtime
@@ -780,7 +782,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '11.0.7')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '11.0.8')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
