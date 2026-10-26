@@ -1,5 +1,5 @@
 {
-  "version": "11.0.8",
+  "version": "11.0.9",
   "strategy": "general (ALT14)",
   "watchdog": {
     "daily_restart_hour": 4,

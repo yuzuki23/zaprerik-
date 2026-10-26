@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.8")
-    CFG["version"] = "11.0.8"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 11.0.9")
+    CFG["version"] = "11.0.9"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -169,6 +169,11 @@ def _self_hash():
 
 
 WATCHDOG_SELF_HASH = _self_hash()
+
+# Debounce самоперезапуска: если код изменился, ждём 5 циклов (50 сек) перед
+# перезапуском — чтобы антивирус/сохранение не вызвали серию перезапусков.
+RESTART_COOLDOWN_CYCLES = 5
+restart_cooldown_remaining = 0
 
 # Процессы под надзором: имя -> (скрипт, аргументы, частота перезапуска при сбое)
 WATCHED = [
@@ -340,7 +345,7 @@ def _atomic_write_json(path, data):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "11.0.8"),
+        "version": CFG.get("version", "11.0.9"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -505,8 +510,21 @@ def monitor_last_activity():
     """Время последней записи моника (лог, heartbeat или файл статуса). None, если файлов нет."""
     best = None
     # Heartbeat — приоритетнее лога: если монитор застрял внутри цикла,
-    # лог не обновляется, но heartbeat показывает, что процесс жив
-    for p in (BASE_DIR / "monitor_heartbeat.txt", MONITOR_LOG, BASE_DIR / "discord_status.txt"):
+    # лог не обновляется, но heartbeat показывает, что процесс жив.
+    # Читаем СОДЕРЖИМОЕ файла (timestamp), а не st_mtime — надёжнее.
+    hb = BASE_DIR / "monitor_heartbeat.txt"
+    if hb.exists():
+        try:
+            ts_str = hb.read_text(encoding="utf-8").strip()
+            # Формат ISO: 2026-10-25T14:30:00.123456
+            if ts_str:
+                hb_time = datetime.fromisoformat(ts_str)
+                hb_ts = hb_time.timestamp()
+                if best is None or hb_ts > best:
+                    best = hb_ts
+        except Exception:
+            pass
+    for p in (MONITOR_LOG, BASE_DIR / "discord_status.txt"):
         try:
             if p.exists():
                 m = p.stat().st_mtime
@@ -782,7 +800,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '11.0.8')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '11.0.9')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -807,11 +825,17 @@ def _run():
 
     while True:
         # сам перезапуск, если изменился собственный код сторожа (по хэшу)
+        # Debounce: ждём RESTART_COOLDOWN_CYCLES циклов перед перезапуском,
+        # чтобы антивирус/сохранение не вызвали серию перезапусков
         try:
-            cur_hash = _self_hash()
-            if cur_hash is not None and cur_hash != WATCHDOG_SELF_HASH:
-                log("Обнаружено изменение watchdog.py — самоперезапуск для подхвата нового кода")
-                self_restart()
+            if restart_cooldown_remaining > 0:
+                restart_cooldown_remaining -= 1
+            else:
+                cur_hash = _self_hash()
+                if cur_hash is not None and cur_hash != WATCHDOG_SELF_HASH:
+                    log("Обнаружено изменение watchdog.py — самоперезапуск для подхвата нового кода")
+                    restart_cooldown_remaining = RESTART_COOLDOWN_CYCLES
+                    self_restart()
         except Exception:
             pass
         maybe_daily_restart(WATCHED)
@@ -829,15 +853,6 @@ def _run():
                 else:
                     log(f"{entry['name']} всё ещё лежит (код {code}) — повторный запуск")
                 entry["proc"] = start_proc(entry)
-                # №4: сразу фиксируем новый PID в status.json, не дожидаясь
-                # очередного MEMORY_CHECK_INTERVAL — иначе файл врёт
-                # (показывает старый PID убитого процесса).
-                try:
-                    procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
-                    procs["winws"] = winws_pid()
-                    write_status("running", {"processes": procs, "cycle": cycle, "strategy": strategy_state.get("name")})
-                except Exception:
-                    pass
                 continue
             if proc is not None and entry.get("down_since") is not None:
                 log(f"{entry['name']} снова работает (PID={proc.pid})")
@@ -859,6 +874,15 @@ def _run():
                             proc.terminate()
                         except Exception:
                             pass
+
+        # Обновляем status.json после обработки ВСЕХ воркеров — свежий PID
+        # каждого перезапущенного процесса, не ждём MEMORY_CHECK_INTERVAL.
+        try:
+            procs = {e["name"]: e["proc"].pid if e.get("proc") and e["proc"].poll() is None else None for e in WATCHED}
+            procs["winws"] = winws_pid()
+            write_status("running", {"processes": procs, "cycle": cycle, "strategy": strategy_state.get("name")})
+        except Exception:
+            pass
 
         # Проверка: если все 3 процесса умерли одновременно — логируем причину
         all_dead = all(

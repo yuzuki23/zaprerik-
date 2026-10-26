@@ -409,6 +409,11 @@ def main():
             pass
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         codes = {u: http(u) for u in HEALTH_URLS}
+        # Середина цикла — ещё один heartbeat, если застряли на долгой проверке
+        try:
+            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
         detector, detector_src = check_detector()
         # Вердикт «всё ок» = сайт discord.com отвечает 200 И независимый детектор
         # подтверждает доступ. gateway.discord.gg игнорируется (штатно 404/000).
