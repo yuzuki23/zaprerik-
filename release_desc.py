@@ -8,8 +8,14 @@ from typing import Optional
 
 # Что нового по текущей версии (для верхней — список «Что нового»).
 _CHANGES: dict = {
+    "12.0.1": [
+        "Монитор: heartbeat обновляется в конце цикла перед time.sleep — watchdog видит, что monitor дожил до конца итерации",
+        "Монитор: heartbeat обновляется перед КАЖДОЙ write_status() — watchdog видит зависший монитор мгновенно",
+    ],
     "12.0.0": [
         "Переход на ALT15 — новый альтернативный обход Discord",
+        "Фикс зависания моника: heartbeat обновляется после каждой долгой операции (http, check_detector, status_api, check_voice_ws, retry_resolve, restart_zapret_service) — watchdog видит зависший монитор мгновенно",
+        "Фикс OSError: write_status обернута в try/except — monitor больше не падает при ошибке записи в discord_status.txt",
     ],
     "11.0.9": [
         "Монитор: heartbeat обновляется дважды за цикл (старт + середина) — watchdog видит зависший монитор быстрее",

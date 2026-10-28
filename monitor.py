@@ -154,7 +154,10 @@ def write_status(ts, codes, detector, detector_src, extra="", voice="?"):
     ]
     if extra:
         lines.append("Доп.: " + extra)
-    STATUS.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        STATUS.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # игнорируем ошибки записи — не критично
 
 
 def status_api():
@@ -409,18 +412,29 @@ def main():
             pass
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         codes = {u: http(u) for u in HEALTH_URLS}
-        # Середина цикла — ещё один heartbeat, если застряли на долгой проверке
         try:
             HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
         except Exception:
             pass
         detector, detector_src = check_detector()
+        try:
+            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
         # Вердикт «всё ок» = сайт discord.com отвечает 200 И независимый детектор
         # подтверждает доступ. gateway.discord.gg игнорируется (штатно 404/000).
         ok = (codes.get(DISCORD_URL) == "200") and (detector in ("200", "204"))
         api, indicator = status_api()  # официальный статус Discord (status.discord.com)
+        try:
+            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
         cdn = http(CDN_URL)  # Discord CDN (аватары/картинки)
         voice = check_voice_ws()  # реальная проверка голосового WebSocket-пути
+        try:
+            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
         disc_gone = api in ("major_outage", "partial_outage") or indicator in ("major", "minor", "critical")
         extra = f"discordstatus.com: API={api}, indicator={indicator} | cdn.discordapp.com -> {cdn} | voice_ws:{voice}"
         line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
@@ -429,7 +443,18 @@ def main():
         if ok:
             # всё в порядке — пишем статус и сбрасываем счётчик сбоев
             fail_streak = 0
-            write_status(ts, codes, detector, detector_src, extra, voice)  # живой статус-файл
+            try:
+                HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            except Exception:
+                pass
+            try:
+                write_status(ts, codes, detector, detector_src, extra, voice)  # живой статус-файл
+            except Exception:
+                pass
+            try:
+                HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            except Exception:
+                pass
             if was_down and not disc_gone:
                 # официальный статус восстановился — радостное уведомление
                 notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
@@ -445,8 +470,19 @@ def main():
                 # winws мёртв/неизвестен — сразу перезапуск и проверка восстановления
                 fail_streak = 0
                 restore = restore_discord()
+                try:
+                    HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                except Exception:
+                    pass
                 codes = {u: http(u) for u in HEALTH_URLS}
-                write_status(ts, codes, detector, detector_src, extra, voice)
+                try:
+                    HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                except Exception:
+                    pass
+                try:
+                    write_status(ts, codes, detector, detector_src, extra, voice)
+                except Exception:
+                    pass
                 line2 = line + f" | winws -> {alive} | service -> {svc} | autorestart -> {restore}"
                 print(RED + "СБОЙ: " + line2 + RESET, flush=True)
                 log_line("СБОЙ " + line2 + "\n")
@@ -457,6 +493,10 @@ def main():
                 # разовые обрывы маршрута. Если на перепроверке всё вернулось в норму,
                 # это НЕ сбой — тихо пишем «ВСЁ РАБОТАЕТ» (микро-блип отпущен).
                 recovered, d2, g2 = retry_resolve(DISCORD_URL, GATEWAY_URL)
+                try:
+                    HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                except Exception:
+                    pass
                 if recovered:
                     fail_streak = 0
                     codes = {DISCORD_URL: d2, GATEWAY_URL: g2}
@@ -464,8 +504,15 @@ def main():
                     # чтобы в логе не висело противоречивое «OK … 000».
                     line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
                             + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator} | voice_ws -> {voice}")
-                    write_status(ts, codes, detector, detector_src,
-                                 extra + " | микро-блип отпущен на перепроверке — работает", voice)
+                    try:
+                        HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                    except Exception:
+                        pass
+                    try:
+                        write_status(ts, codes, detector, detector_src,
+                                     extra + " | микро-блип отпущен на перепроверке — работает", voice)
+                    except Exception:
+                        pass
                     if was_down and not disc_gone:
                         notify("Discord снова работает!", f"{ts}\\nAPI: {api} ({indicator}) — можно заходить")
                     was_down = disc_gone
@@ -474,7 +521,14 @@ def main():
                         "OK " + line + " (микро-блип маршрута, сам восстановился на перепроверке)\n")
                 else:
                     # Перепроверки не помогли. Решаем: настоящий блок или мимолётный блип.
-                    write_status(ts, codes, detector, detector_src, extra, voice)
+                    try:
+                        HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                    except Exception:
+                        pass
+                    try:
+                        write_status(ts, codes, detector, detector_src, extra, voice)
+                    except Exception:
+                        pass
                     disc_down = codes.get(DISCORD_URL) != "200"
                     det_ok = detector in ("200", "204")
 
@@ -529,6 +583,10 @@ def main():
                                     # столько подряд — перезапускаем службу zapret (winws),
                                     # чтобы сбросить DPI-состояние и поднять обход
                                     res = restart_zapret_service()
+                                    try:
+                                        HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                                    except Exception:
+                                        pass
                                     LAST_RESTART_TS = now
                                     line2 += f" | autorestart -> {res}"
                                     fail_streak = 0
@@ -541,9 +599,14 @@ def main():
                             print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                             log_line("INFO " + line2 + "\n")
                             notify("Zapret: Discord недоступен",
-                                    f"{ts}\nМаршрутная блокировка ({', '.join(failed)}), продолжается")
+                                   f"{ts}\nМаршрутная блокировка ({', '.join(failed)}), продолжается")
                     was_down = disc_gone
         rotate_log()
+        # Финальный heartbeat в конце цикла — watchdog видит, что monitor дожил до конца итерации
+        try:
+            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+        except Exception:
+            pass
         time.sleep(interval)
 
 
