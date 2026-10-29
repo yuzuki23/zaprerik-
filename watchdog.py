@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 12.0.2")
-    CFG["version"] = "12.0.2"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 12.0.3")
+    CFG["version"] = "12.0.3"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -174,6 +174,10 @@ WATCHDOG_SELF_HASH = _self_hash()
 # перезапуском — чтобы антивирус/сохранение не вызвали серию перезапусков.
 RESTART_COOLDOWN_CYCLES = 5
 restart_cooldown_remaining = 0
+
+# Heartbeat-живость моника: после перезапуска monitor нужно подождать N циклов,
+# чтобы monitor прошёл хотя бы один цикл и обновил heartbeat.
+MONITOR_HEARTBEAT_COOLDOWN = 3  # циклов после перезапуска monitor
 
 # Процессы под надзором: имя -> (скрипт, аргументы, частота перезапуска при сбое)
 WATCHED = [
@@ -345,7 +349,7 @@ def _atomic_write_json(path, data):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "12.0.2"),
+        "version": CFG.get("version", "12.0.3"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -806,7 +810,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '12.0.2')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '12.0.3')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()
@@ -859,6 +863,8 @@ def _run():
                 else:
                     log(f"{entry['name']} всё ещё лежит (код {code}) — повторный запуск")
                 entry["proc"] = start_proc(entry)
+                # Сброс heartbeat-таймаута: monitor нужно подождать MONITOR_HEARTBEAT_COOLDOWN циклов
+                entry["last_restart_cycle"] = cycle
                 continue
             if proc is not None and entry.get("down_since") is not None:
                 log(f"{entry['name']} снова работает (PID={proc.pid})")
@@ -866,20 +872,24 @@ def _run():
 
             # Heartbeat-живость моника: процесс жив, но не пишет в лог > LIVENESS_TIMEOUT.
             # Зависший (молчащий) моник сторож иначе не лечит — он видит только падение.
+            # После перезапуска monitor ждём MONITOR_HEARTBEAT_COOLDOWN циклов,
+            # чтобы monitor прошёл хотя бы один цикл и обновил heartbeat.
             if entry["name"] == "monitor" and proc is not None and proc.poll() is None:
-                last = monitor_last_activity()
-                if last is not None:
-                    idle = time.time() - last
-                    if idle > LIVENESS_TIMEOUT:
-                        diag = monitor_silence_diagnosis()
-                        log(f"МОНИК ЗАВИС (молчит {int(idle // 60)} мин при живом процессе; {diag}) — принудительный перезапуск")
-                        # Своё убийство — не падение: помечаем как плановый рестарт,
-                        # иначе следующий цикл напишет ложное «ПАДЕНИЕ monitor».
-                        planned_restart.add(entry["name"])
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
+                skip = entry.get("last_restart_cycle") is not None and cycle - entry["last_restart_cycle"] < MONITOR_HEARTBEAT_COOLDOWN
+                if not skip:
+                    last = monitor_last_activity()
+                    if last is not None:
+                        idle = time.time() - last
+                        if idle > LIVENESS_TIMEOUT:
+                            diag = monitor_silence_diagnosis()
+                            log(f"МОНИК ЗАВИС (молчит {int(idle // 60)} мин при живом процессе; {diag}) — принудительный перезапуск")
+                            # Своё убийство — не падение: помечаем как плановый рестарт,
+                            # иначе следующий цикл напишет ложное «ПАДЕНИЕ monitor».
+                            planned_restart.add(entry["name"])
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
 
         # Обновляем status.json после обработки ВСЕХ воркеров — свежий PID
         # каждого перезапущенного процесса, не ждём MEMORY_CHECK_INTERVAL.
@@ -889,6 +899,11 @@ def _run():
             write_status("running", {"processes": procs, "cycle": cycle, "strategy": strategy_state.get("name")})
         except Exception:
             pass
+
+        # Сброс heartbeat-таймаута после перезапуска: каждый цикл уменьшаем счётчик
+        for entry in WATCHED:
+            if entry.get("last_restart_cycle") is not None and cycle - entry["last_restart_cycle"] >= MONITOR_HEARTBEAT_COOLDOWN:
+                entry.pop("last_restart_cycle", None)
 
         # Проверка: если все 3 процесса умерли одновременно — логируем причину
         all_dead = all(
