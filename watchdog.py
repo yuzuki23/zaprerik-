@@ -139,8 +139,8 @@ for (section, key), (lo, hi) in RANGES.items():
 # Валидация формата версии X.Y.Z
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 if not isinstance(CFG.get("version"), str) or not _VERSION_RE.fullmatch(str(CFG.get("version"))):
-    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 12.0.1")
-    CFG["version"] = "12.0.1"
+    print(f"[WARN] config.json version={CFG.get('version')!r} — ожидался формат X.Y.Z — сброшено на 12.0.2")
+    CFG["version"] = "12.0.2"
 
 # Конфиг -> переменные
 DAILY_RESTART_HOUR = CFG["watchdog"]["daily_restart_hour"]
@@ -345,7 +345,7 @@ def _atomic_write_json(path, data):
 def write_status(status, details=None):
     """Записывает JSON-статус в status.json для внешних программ."""
     data = {
-        "version": CFG.get("version", "12.0.1"),
+        "version": CFG.get("version", "12.0.2"),
         "timestamp": datetime.now().isoformat(),
         "status": status,
     }
@@ -512,16 +512,22 @@ def monitor_last_activity():
     # Heartbeat — приоритетнее лога: если монитор застрял внутри цикла,
     # лог не обновляется, но heartbeat показывает, что процесс жив.
     # Читаем СОДЕРЖИМОЕ файла (timestamp), а не st_mtime — надёжнее.
+    # Поддерживаем два формата: ISO с T и простой "YYYY-MM-DD HH:MM:SS"
     hb = BASE_DIR / "monitor_heartbeat.txt"
     if hb.exists():
         try:
             ts_str = hb.read_text(encoding="utf-8").strip()
-            # Формат ISO: 2026-10-25T14:30:00.123456
             if ts_str:
-                hb_time = datetime.fromisoformat(ts_str)
-                hb_ts = hb_time.timestamp()
-                if best is None or hb_ts > best:
-                    best = hb_ts
+                # Пробуем оба формата
+                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        hb_time = datetime.strptime(ts_str, fmt)
+                        hb_ts = hb_time.timestamp()
+                        if best is None or hb_ts > best:
+                            best = hb_ts
+                        break  # если формат подошёл — выходим
+                    except ValueError:
+                        continue  # пробуем следующий формат
         except Exception:
             pass
     for p in (MONITOR_LOG, BASE_DIR / "discord_status.txt"):
@@ -800,7 +806,7 @@ def _run():
     rotate(WATCHDOG_LOG)
     rotate_by_lines(WATCHDOG_LOG)
     cleanup_old_logs()
-    log(f"Watchdog запущен (v{CFG.get('version', '12.0.1')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
+    log(f"Watchdog запущен (v{CFG.get('version', '12.0.2')}). Под надзором: " + ", ".join(e["name"] for e in WATCHED) + " + zapret/winws")
     write_status("starting")
     kill_stray_scripts()
     check_winws_hash()

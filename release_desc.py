@@ -8,6 +8,11 @@ from typing import Optional
 
 # Что нового по текущей версии (для верхней — список «Что нового»).
 _CHANGES: dict = {
+    "12.0.2": [
+        "Монитор: heartbeat формат изменён на «YYYY-MM-DD HH:MM:SS» — совместимо со всеми версиями Python/Windows, watchdog больше не игнорирует heartbeat из-за ошибки парсинга",
+        "Монитор: heartbeat обновляется после КАЖДОЙ долгой операции (http, check_detector, status_api, check_voice_ws) и перед КАЖДОЙ write_status() — watchdog видит зависший монитор мгновенно",
+        "Сторож: watchdog читает heartbeat с fallback на st_mtime — если timestamp не парсится, используется время изменения файла",
+    ],
     "12.0.1": [
         "Монитор: heartbeat обновляется в конце цикла перед time.sleep — watchdog видит, что monitor дожил до конца итерации",
         "Монитор: heartbeat обновляется перед КАЖДОЙ write_status() — watchdog видит зависший монитор мгновенно",

@@ -406,19 +406,20 @@ def main():
     while True:
         # Heartbeat: обновляем файл, чтобы watchdog видел, что монитор жив
         # (даже если застрял внутри цикла на долгой проверке)
+        # Формат ISO без timezone — совместимо со всеми версиями Python/Windows
         try:
-            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
         except Exception:
             pass
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         codes = {u: http(u) for u in HEALTH_URLS}
         try:
-            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
         except Exception:
             pass
         detector, detector_src = check_detector()
         try:
-            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
         except Exception:
             pass
         # Вердикт «всё ок» = сайт discord.com отвечает 200 И независимый детектор
@@ -426,13 +427,13 @@ def main():
         ok = (codes.get(DISCORD_URL) == "200") and (detector in ("200", "204"))
         api, indicator = status_api()  # официальный статус Discord (status.discord.com)
         try:
-            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
         except Exception:
             pass
         cdn = http(CDN_URL)  # Discord CDN (аватары/картинки)
         voice = check_voice_ws()  # реальная проверка голосового WebSocket-пути
         try:
-            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
         except Exception:
             pass
         disc_gone = api in ("major_outage", "partial_outage") or indicator in ("major", "minor", "critical")
@@ -444,7 +445,7 @@ def main():
             # всё в порядке — пишем статус и сбрасываем счётчик сбоев
             fail_streak = 0
             try:
-                HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
             except Exception:
                 pass
             try:
@@ -452,7 +453,7 @@ def main():
             except Exception:
                 pass
             try:
-                HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
             except Exception:
                 pass
             if was_down and not disc_gone:
@@ -471,12 +472,12 @@ def main():
                 fail_streak = 0
                 restore = restore_discord()
                 try:
-                    HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                    HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
                 except Exception:
                     pass
                 codes = {u: http(u) for u in HEALTH_URLS}
                 try:
-                    HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                    HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
                 except Exception:
                     pass
                 try:
@@ -494,7 +495,7 @@ def main():
                 # это НЕ сбой — тихо пишем «ВСЁ РАБОТАЕТ» (микро-блип отпущен).
                 recovered, d2, g2 = retry_resolve(DISCORD_URL, GATEWAY_URL)
                 try:
-                    HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                    HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
                 except Exception:
                     pass
                 if recovered:
@@ -505,7 +506,7 @@ def main():
                     line = (f"{ts} | " + " | ".join(f"{u} -> {c}" for u, c in codes.items())
                             + f" | detector({detector_src}) -> {detector} | api: {api}/{indicator} | voice_ws -> {voice}")
                     try:
-                        HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                        HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
                     except Exception:
                         pass
                     try:
@@ -522,7 +523,7 @@ def main():
                 else:
                     # Перепроверки не помогли. Решаем: настоящий блок или мимолётный блип.
                     try:
-                        HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+                        HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
                     except Exception:
                         pass
                     try:
@@ -604,7 +605,7 @@ def main():
         rotate_log()
         # Финальный heartbeat в конце цикла — watchdog видит, что monitor дожил до конца итерации
         try:
-            HEARTBEAT.write_text(datetime.now().isoformat(), encoding="utf-8")
+            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
         except Exception:
             pass
         time.sleep(interval)
