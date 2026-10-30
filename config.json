@@ -1,6 +1,6 @@
 {
-  "version": "12.0.3.fix",
-  "strategy": "general (ALT15)",
+  "version": "12.0.4",
+  "strategy": "general (ROSTELECOM)",
   "watchdog": {
     "daily_restart_hour": 4,
     "liveness_timeout_sec": 360,

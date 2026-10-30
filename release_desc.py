@@ -8,6 +8,9 @@ from typing import Optional
 
 # Что нового по текущей версии (для верхней — список «Что нового»).
 _CHANGES: dict = {
+    "12.0.4": [
+        "Добавлен general (BEELINE 2).bat — комбинированная стратегия для Билайна: fake,frag + hostfakesplit + md5sig + ts — увеличенные repeats для стабильности",
+    ],
     "12.0.3.fix": [
         "Монитор: heartbeat обновляется в каждой ветке if/elif/else — monitor больше не «теряется» при длительных таймаутах discord.com",
         "Монитор: heartbeat обновляется после каждого вызова http() и check_detector() — watchdog видит зависший монитор мгновенно",
