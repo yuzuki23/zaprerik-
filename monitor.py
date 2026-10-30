@@ -537,6 +537,10 @@ def main():
                         # discord.com жив — «сбой» был на шлюзе/в пробе, а не на сайте.
                         # Не трогаем обход: это штатное поведение gateway.discord.gg.
                         fail_streak = 0
+                        try:
+                            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                        except Exception:
+                            pass
                         line2 = line + " | discord.com доступен — микро-блип не на сайте, обход не трогаем"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                         log_line("INFO " + line2 + "\n")
@@ -545,6 +549,10 @@ def main():
                         # подтверждает, что Discord доступен. Значит это транзитный
                         # затык/особенность пробы, а не блок — обход не перезапускаем.
                         fail_streak = 0
+                        try:
+                            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                        except Exception:
+                            pass
                         line2 = line + " | discord.com недоступен при пробе, но detector404 доступен — транзитный блип, обход не трогаем"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                         log_line("INFO " + line2 + "\n")
@@ -553,6 +561,10 @@ def main():
                         # блок Discord. Не дёргаем обход из-за отказа самих детекторов:
                         # ждём ещё цикл, счётчик сбоев не накручиваем.
                         fail_streak = 0
+                        try:
+                            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                        except Exception:
+                            pass
                         line2 = line + " | оба детектора недоступны — блок не подтверждён, ждём ещё цикл (обход не трогаем)"
                         print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                         log_line("INFO " + line2 + "\n")
@@ -562,11 +574,19 @@ def main():
                         if codes.get(GATEWAY_URL) not in ("200", "404"):
                             failed.append("gateway.discord.gg")
                         fail_streak += 1
+                        try:
+                            HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                        except Exception:
+                            pass
                         line2 = line + (f" | winws жив — маршрутная блокировка "
                                         f"({fail_streak}/{RESTART_AFTER_FAILS}): " + ", ".join(failed))
                         if fail_streak >= RESTART_AFTER_FAILS:
                             if disc_gone:
                                 # подтверждённый глобальный сбой Discord — перезапуск не поможет
+                                try:
+                                    HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                                except Exception:
+                                    pass
                                 line2 += " | глобальный сбой Discord (status.discord.com) — перезапуск пропущен"
                                 fail_streak = 0
                                 print(YELLOW + "INFO: " + line2 + RESET, flush=True)
@@ -575,6 +595,10 @@ def main():
                                 now = time.time()
                                 if now - LAST_RESTART_TS < RESTART_COOLDOWN:
                                     # защита от флапа: не перезапускаем чаще раза в RESTART_COOLDOWN
+                                    try:
+                                        HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                                    except Exception:
+                                        pass
                                     line2 += (" | autorestart пропущен (cooldown: перезапуск был менее "
                                               f"{RESTART_COOLDOWN // 60} мин назад)")
                                     fail_streak = 0
@@ -597,6 +621,10 @@ def main():
                                            f"{ts}\n{RESTART_AFTER_FAILS} сбоя подряд (сайт+детектор), перезапускаю zapret")
                         else:
                             # пока не набралось RESTART_AFTER_FAILS подряд — INFO, не тревога
+                            try:
+                                HEARTBEAT.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+                            except Exception:
+                                pass
                             print(YELLOW + "INFO: " + line2 + RESET, flush=True)
                             log_line("INFO " + line2 + "\n")
                             notify("Zapret: Discord недоступен",
